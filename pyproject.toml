@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-tokens"
-version = "1.0.0"
+version = "1.1.0"
 description = "Unified multi-agent token and session tracking CLI across OpenCode, Claude Code, and Antigravity (AGY)."
 readme = "README.md"
 requires-python = ">=3.9"
