@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-tokens"
+version = "1.0.0"
+description = "Unified multi-agent token and session tracking CLI across OpenCode, Claude Code, and Antigravity (AGY)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Hriteek Roy", email = "hriteekroy1869@gmail.com" }
+]
+keywords = ["ai-agents", "tokens", "opencode", "claude-code", "antigravity", "llm-metrics"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.scripts]
+agent-tokens = "agent_tokens.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
