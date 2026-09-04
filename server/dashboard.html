@@ -95,6 +95,7 @@ select{background:var(--card);color:var(--ink);border:1px solid var(--line);bord
 </div>
 <script>
 let window_ = "daily", data = null;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt = n => n >= 1e9 ? (n/1e9).toFixed(2)+"B" : n >= 1e6 ? (n/1e6).toFixed(2)+"M" : n >= 1e3 ? (n/1e3).toFixed(1)+"K" : String(n);
 async function load(){
   const r = await fetch("/api/v1/leaderboard?window="+window_);
@@ -108,18 +109,18 @@ async function load(){
   document.getElementById("count").textContent = data.users.length + " contributors";
   const max = Math.max(1, ...data.users.map(u=>u.tokens));
   document.getElementById("overall").innerHTML = data.users.map((u,i)=>
-    `<tr class="${i===0?'leader':''}"><td class="rank">${i+1}</td><td><b>${u.username}</b><div class="bar"><i style="width:${(100*u.tokens/max).toFixed(1)}%"></i></div></td><td><span class="pill">${u.role}</span></td><td class="num">${fmt(u.tokens)}</td></tr>`
+    `<tr class="${i===0?'leader':''}"><td class="rank">${i+1}</td><td><b>${esc(u.username)}</b><div class="bar"><i style="width:${(100*u.tokens/max).toFixed(1)}%"></i></div></td><td><span class="pill">${esc(u.role)}</span></td><td class="num">${fmt(u.tokens)}</td></tr>`
   ).join("") || `<tr><td colspan=4>No pushes yet — run <code>agent-tokens --sync</code>.</td></tr>`;
   const topH = data.harnesses.length ? data.harnesses[0].tokens : 0;
   document.getElementById("harness").innerHTML = data.harnesses.slice(0,8).map(h=>
-    `<tr><td>${h.harness}</td><td class="num${h.tokens===topH?' best':''}">${fmt(h.tokens)}</td></tr>`).join("") || "<tr><td>—</td></tr>";
+    `<tr><td>${esc(h.harness)}</td><td class="num${h.tokens===topH?' best':''}">${fmt(h.tokens)}</td></tr>`).join("") || "<tr><td>—</td></tr>";
   const topM = data.models.length ? data.models[0].tokens : 0;
   document.getElementById("models").innerHTML = data.models.slice(0,8).map(m=>
-    `<tr><td>${m.model}</td><td class="num${m.tokens===topM?' best':''}">${fmt(m.tokens)}</td></tr>`).join("") || "<tr><td>—</td></tr>";
+    `<tr><td>${esc(m.model)}</td><td class="num${m.tokens===topM?' best':''}">${fmt(m.tokens)}</td></tr>`).join("") || "<tr><td>—</td></tr>";
   const sel = document.getElementById("roleSel");
   const roles = Object.keys(data.by_role).sort();
   if(!sel.options.length || sel.dataset.w !== window_){
-    sel.innerHTML = roles.map(r=>`<option>${r}</option>`).join("");
+    sel.innerHTML = roles.map(r=>`<option>${esc(r)}</option>`).join("");
     sel.dataset.w = window_;
   }
   renderRole();
@@ -128,7 +129,7 @@ function renderRole(){
   const r = document.getElementById("roleSel").value;
   const rows = (data && data.by_role[r]) || [];
   document.getElementById("roleBody").innerHTML = rows.map((u,i)=>
-    `<tr class="${i===0?'leader':''}"><td class="rank">${i+1}</td><td><b>${u.username}</b></td><td class="num">${fmt(u.tokens)}</td><td class="num">${fmt(u.cumulative)}</td></tr>`
+    `<tr class="${i===0?'leader':''}"><td class="rank">${i+1}</td><td><b>${esc(u.username)}</b></td><td class="num">${fmt(u.tokens)}</td><td class="num">${fmt(u.cumulative)}</td></tr>`
   ).join("") || "<tr><td colspan=4>No data for this role.</td></tr>";
 }
 document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));b.classList.add("active");window_=b.dataset.w;load();});

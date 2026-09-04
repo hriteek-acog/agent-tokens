@@ -256,6 +256,56 @@ class TestServer(unittest.TestCase):
                     rc = doctormod.run_doctor()
         self.assertEqual(rc, 1)  # missing identity -> FAIL
 
+    def test_ingest_rejects_xss_username(self):
+        import server.app as appmod
+
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            with mock.patch.object(appmod, "DATA_DIR", data), \
+                 mock.patch.object(appmod, "DB_PATH", data / "leaderboard.db"), \
+                 mock.patch.object(appmod, "LEDGER_PATH", data / "ledger.jsonl"), \
+                 mock.patch.object(appmod, "USERS_JSON", data / "users.json"):
+                evil = syncmod.build_snapshot(
+                    '"><img src=x onerror=alert(1)>', "e@aganitha.ai", "other", [_report()])
+                with self.assertRaises(ValueError):
+                    appmod.ingest_snapshot(evil)
+                evil_model = syncmod.build_snapshot("u", "u@aganitha.ai", "other", [_report()])
+                evil_model["models"] = [{"agent_name": "Codex", "model_id": "<script>",
+                                         "total_tokens": 5, "session_count": 0, "turn_count": 0}]
+                evil_model["checksum"] = syncmod.checksum_of(evil_model)
+                with self.assertRaises(ValueError):
+                    appmod.ingest_snapshot(evil_model)
+                # Real-world names (spaces, parens, slashes) still pass.
+                ok = syncmod.build_snapshot("hriteek", "h@aganitha.ai", "engineering",
+                                            [AgentReport(agent_name="Antigravity (AGY)",
+                                                         models=[TokenStats(model_id="muse-spark-1.3",
+                                                                            input_tokens=10)])])
+                self.assertTrue(appmod.ingest_snapshot(ok)["ok"])
+
+    def test_ingest_clamps_collected_at(self):
+        import datetime as _dt
+
+        import server.app as appmod
+
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            with mock.patch.object(appmod, "DATA_DIR", data), \
+                 mock.patch.object(appmod, "DB_PATH", data / "leaderboard.db"), \
+                 mock.patch.object(appmod, "LEDGER_PATH", data / "ledger.jsonl"), \
+                 mock.patch.object(appmod, "USERS_JSON", data / "users.json"):
+                stale = syncmod.build_snapshot("u", "u@aganitha.ai", "other", [_report()])
+                stale["collected_at"] = (
+                    _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=60)).isoformat()
+                stale["checksum"] = syncmod.checksum_of(stale)
+                with self.assertRaises(ValueError):
+                    appmod.ingest_snapshot(stale)
+                future = syncmod.build_snapshot("u", "u@aganitha.ai", "other", [_report()])
+                future["collected_at"] = (
+                    _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=1)).isoformat()
+                future["checksum"] = syncmod.checksum_of(future)
+                with self.assertRaises(ValueError):
+                    appmod.ingest_snapshot(future)
+
 
 if __name__ == "__main__":
     unittest.main()
