@@ -53,7 +53,7 @@ bash scripts/setup_shared_dir.sh
 docker compose -f server/docker-compose.yml up -d --build
 ```
 
-No ports are published; the reverse proxy picks the container up by its labels. Details: `docs/design.md`, trade-offs: `docs/PROS_CONS.md`, agent skill: `SKILL.md`.
+No ports are published; the reverse proxy picks the container up by its labels. Details: `docs/design.md`, full reimplementation spec: `docs/SPEC.md`, trade-offs: `docs/PROS_CONS.md`, agent skill: `SKILL.md`.
 
 ## Development
 
