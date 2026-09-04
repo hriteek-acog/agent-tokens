@@ -255,6 +255,30 @@ class TestServer(unittest.TestCase):
                 self.assertEqual(lb["users"][0]["tokens"], 100100)
                 self.assertEqual(lb["users"][0]["pushes"], 2)
 
+    def test_all_time_window(self):
+        import datetime as _dt
+
+        import server.app as appmod
+
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            with mock.patch.object(appmod, "DATA_DIR", data), \
+                 mock.patch.object(appmod, "DB_PATH", data / "leaderboard.db"), \
+                 mock.patch.object(appmod, "LEDGER_PATH", data / "ledger.jsonl"), \
+                 mock.patch.object(appmod, "USERS_JSON", data / "users.json"):
+                now = _dt.datetime.now(_dt.timezone.utc)
+                old = syncmod.build_snapshot("u", "u@aganitha.ai", "other", [_report("Codex", 1000)])
+                old["collected_at"] = (now - _dt.timedelta(days=10)).isoformat()
+                old["checksum"] = syncmod.checksum_of(old)
+                new = syncmod.build_snapshot("u", "u@aganitha.ai", "other", [_report("Codex", 2500)])
+                appmod.ingest_snapshot(old)
+                appmod.ingest_snapshot(new)
+                alltime = appmod.leaderboard("all")
+                self.assertEqual(alltime["window"], "all")
+                self.assertEqual(alltime["users"][0]["tokens"], 2500)
+                self.assertEqual(alltime["users"][0]["cumulative"], 2500)
+                self.assertEqual(appmod.leaderboard("bogus")["window"], "daily")
+
     def test_doctor_checks(self):
         from agent_tokens import doctor as doctormod
 

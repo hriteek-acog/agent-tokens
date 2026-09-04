@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/logo.png">
 <title>Aganitha · Agent Token Leaderboard</title>
 <style>
 /* Enterprise palette: flat whites and slate grays with a single Google-blue
@@ -21,13 +22,19 @@
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--ink);font-family:var(--font)}
 .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 60px}
-header{display:flex;align-items:center;gap:16px;padding:18px 22px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}
+header{display:flex;align-items:center;gap:16px;padding:18px 22px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);flex-wrap:wrap}
 .logo-img{height:36px;width:auto;display:block}
 h1{font-size:20px;margin:0;font-weight:500}
 .sub{color:var(--muted);font-size:13px;margin-top:2px}
 .tabs{margin-left:auto;display:flex;gap:8px}
 .tab{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px}
 .tab.active{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:500}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:16px}
+@media(max-width:700px){.stats{grid-template-columns:1fr}}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 18px}
+.stat .label{font-size:11px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.6px}
+.stat .value{font-size:24px;font-weight:500;margin-top:4px;font-variant-numeric:tabular-nums}
+.stat .sub2{font-size:12px;color:var(--blue);margin-top:2px}
 .grid{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:16px}
 @media(max-width:900px){.grid{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
@@ -39,18 +46,24 @@ td{padding:9px 8px;border-bottom:1px solid var(--line)}
 tbody tr:last-child td{border-bottom:none}
 tr.leader td{background:var(--blue-fill)}
 tr.leader td:first-child{border-left:3px solid var(--blue)}
+tr.me td{background:var(--blue-fill)}
+tr.me td .you{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:4px;background:var(--blue);color:#fff;font-size:11px;font-weight:500}
+tr.stale{opacity:.55}
 td.rank{color:var(--muted);width:36px}
 tr.leader td.rank{color:var(--blue);font-weight:700}
+.recency{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
 .num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
-td.best{background:var(--gray-best);font-weight:700}
 .pill{display:inline-block;padding:2px 10px;border-radius:4px;background:var(--gray-best);font-size:12px;color:var(--muted)}
 .role-sec{margin-top:16px}
-.meta{display:flex;gap:12px;color:var(--muted);font-size:12px;margin-top:12px}
+.meta{display:flex;gap:12px;color:var(--muted);font-size:12px;margin-top:12px;flex-wrap:wrap}
 .bar{height:8px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:6px}
 .bar>i{display:block;height:100%;background:var(--gray-bar)}
 tr.leader .bar>i{background:var(--blue)}
 footer{color:var(--muted);font-size:12px;margin-top:18px;text-align:center}
 select{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:13px}
+.search{width:100%;border:1px solid var(--line);border-radius:6px;padding:7px 12px;font-size:13px;margin-bottom:10px;font-family:var(--font)}
+.search:focus{outline:2px solid var(--blue-fill);border-color:var(--blue)}
+tbody#overall tr{cursor:pointer}
 </style>
 </head>
 <body>
@@ -64,22 +77,30 @@ select{background:var(--card);color:var(--ink);border:1px solid var(--line);bord
     <div class="tabs">
       <button class="tab active" data-w="daily">Daily</button>
       <button class="tab" data-w="weekly">Weekly</button>
+      <button class="tab" data-w="all">All-time</button>
     </div>
   </header>
+
+  <div class="stats">
+    <div class="stat"><div class="label">Org tokens (<span id="statScope">today</span>)</div><div class="value" id="statTotal">—</div><div class="sub2" id="statTop">—</div></div>
+    <div class="stat"><div class="label">Contributors</div><div class="value" id="statUsers">—</div><div class="sub2" id="statRoles">—</div></div>
+    <div class="stat"><div class="label">Top harness</div><div class="value" id="statHarness" style="font-size:18px">—</div><div class="sub2" id="statHarnessN">—</div></div>
+  </div>
 
   <div class="grid">
     <div class="card">
       <h2>Overall leaderboard <span class="hint" id="scope">today</span></h2>
-      <table><thead><tr><th>#</th><th>User</th><th>Role</th><th class="num">Tokens</th></tr></thead>
+      <input class="search" id="q" placeholder="Search user…" oninput="renderOverall()">
+      <table><thead><tr><th>#</th><th>User</th><th>Role</th><th class="num" id="thTokens" title="Usage within the selected window (cumulative counters minus pre-window baseline)">Tokens</th></tr></thead>
       <tbody id="overall"></tbody></table>
-      <div class="meta"><span id="count"></span><span id="gen"></span></div>
+      <div class="meta"><span id="count"></span><span id="gen"></span><span id="meHint"></span></div>
     </div>
     <div class="card">
       <h2>Top harnesses</h2>
       <table><thead><tr><th>Harness</th><th class="num">Tokens</th></tr></thead>
       <tbody id="harness"></tbody></table>
       <h2 style="margin-top:18px">Top models</h2>
-      <table><thead><tr><th>Model</th><th class="num">Tokens</th></tr></thead>
+      <table><thead><tr><th>Harness</th><th>Model</th><th class="num">Sessions</th><th class="num">Tokens</th></tr></thead>
       <tbody id="models"></tbody></table>
     </div>
   </div>
@@ -87,36 +108,66 @@ select{background:var(--card);color:var(--ink);border:1px solid var(--line);bord
   <div class="card role-sec">
     <h2>Role-wise board</h2>
     <label class="pill">role <select id="roleSel"></select></label>
-    <table style="margin-top:10px"><thead><tr><th>#</th><th>User</th><th class="num">Tokens</th><th class="num">Cumulative</th></tr></thead>
+    <table style="margin-top:10px"><thead><tr><th>#</th><th>User</th><th class="num" title="Usage within the selected window">Tokens</th><th class="num" title="All-time cumulative across the user's machines">All-time</th></tr></thead>
     <tbody id="roleBody"></tbody></table>
   </div>
 
-  <footer>aganitha.ai · token-maxing dashboard · auto-refreshes every 10s · served from own3</footer>
+  <footer>aganitha.ai · token-maxing dashboard · auto-refreshes every 10s · click your row to mark it as you</footer>
 </div>
 <script>
 let window_ = "daily", data = null;
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt = n => n >= 1e9 ? (n/1e9).toFixed(2)+"B" : n >= 1e6 ? (n/1e6).toFixed(2)+"M" : n >= 1e3 ? (n/1e3).toFixed(1)+"K" : String(n);
+const rel = iso => {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 90) return "active just now";
+  if (s < 3600) return "active " + Math.floor(s/60) + "m ago";
+  if (s < 86400) return "active " + Math.floor(s/3600) + "h ago";
+  return "active " + Math.floor(s/86400) + "d ago";
+};
+const stale = iso => (Date.now() - new Date(iso).getTime()) > 24*3600*1000;
+const me = () => { try { return localStorage.getItem("tb_me") || ""; } catch(e){ return ""; } };
+const setMe = u => { try { localStorage.setItem("tb_me", u); } catch(e){} renderOverall(); renderRole(); };
+try {
+  const q = new URLSearchParams(location.search).get("user");
+  if (q) localStorage.setItem("tb_me", q.toLowerCase());
+} catch(e){}
 async function load(){
   const r = await fetch("/api/v1/leaderboard?window="+window_);
   data = await r.json();
   const dstr = d => new Date(d).toLocaleDateString(undefined,{month:"short",day:"numeric"});
-  const today = dstr(new Date());
-  document.getElementById("scope").textContent = window_ === "daily"
-    ? "today · " + dstr(data.window_start)
-    : "this week · " + dstr(data.window_start) + " → " + today;
+  const scopeTxt = window_ === "daily" ? "today · " + dstr(data.window_start)
+    : window_ === "weekly" ? "this week · " + dstr(data.window_start) + " → " + dstr(new Date())
+    : "all time · all history";
+  document.getElementById("scope").textContent = scopeTxt;
+  document.getElementById("statScope").textContent = window_ === "all" ? "all time" : window_ === "daily" ? "today" : "this week";
+  document.getElementById("thTokens").textContent = "Tokens (" + (window_ === "all" ? "all time" : window_ === "daily" ? "today" : "this week") + ")";
   document.getElementById("gen").textContent = "updated " + new Date(data.generated_at).toLocaleTimeString();
   document.getElementById("count").textContent = data.users.length + " contributors";
-  const max = Math.max(1, ...data.users.map(u=>u.tokens));
-  document.getElementById("overall").innerHTML = data.users.map((u,i)=>
-    `<tr class="${i===0?'leader':''}"><td class="rank">${i+1}</td><td><b>${esc(u.username)}</b><div class="bar"><i style="width:${(100*u.tokens/max).toFixed(1)}%"></i></div></td><td><span class="pill">${esc(u.role)}</span></td><td class="num">${fmt(u.tokens)}</td></tr>`
-  ).join("") || `<tr><td colspan=4>No pushes yet — run <code>agent-tokens --sync</code>.</td></tr>`;
-  const topH = data.harnesses.length ? data.harnesses[0].tokens : 0;
+  const total = data.users.reduce((a,u)=>a+u.tokens, 0);
+  document.getElementById("statTotal").textContent = fmt(total);
+  document.getElementById("statUsers").textContent = data.users.length;
+  const nRoles = Object.keys(data.by_role).length;
+  document.getElementById("statRoles").textContent = nRoles + (nRoles === 1 ? " role" : " roles");
+  if (data.harnesses.length) {
+    document.getElementById("statTop").textContent = "top: " + data.harnesses[0].harness;
+    document.getElementById("statHarness").textContent = data.harnesses[0].harness;
+    document.getElementById("statHarnessN").textContent = fmt(data.harnesses[0].tokens);
+  } else {
+    document.getElementById("statTop").textContent = "—";
+    document.getElementById("statHarness").textContent = "—";
+    document.getElementById("statHarnessN").textContent = "—";
+  }
+  const m = me();
+  document.getElementById("meHint").textContent = m ? "you: " + m + " (click another row to change)" : "";
+  renderOverall();
   document.getElementById("harness").innerHTML = data.harnesses.slice(0,8).map(h=>
-    `<tr><td>${esc(h.harness)}</td><td class="num${h.tokens===topH?' best':''}">${fmt(h.tokens)}</td></tr>`).join("") || "<tr><td>—</td></tr>";
-  const topM = data.models.length ? data.models[0].tokens : 0;
-  document.getElementById("models").innerHTML = data.models.slice(0,8).map(m=>
-    `<tr><td>${esc(m.model)}</td><td class="num${m.tokens===topM?' best':''}">${fmt(m.tokens)}</td></tr>`).join("") || "<tr><td>—</td></tr>";
+    `<tr><td>${esc(h.harness)}</td><td class="num">${fmt(h.tokens)}</td></tr>`).join("") || "<tr><td>—</td></tr>";
+  document.getElementById("models").innerHTML = data.models.slice(0,8).map(x=>{
+    const i = x.model.indexOf("/");
+    const h = i < 0 ? "" : x.model.slice(0, i), mod = i < 0 ? x.model : x.model.slice(i+1);
+    return `<tr><td>${esc(h)}</td><td>${esc(mod)}</td><td class="num">${x.sessions}</td><td class="num">${fmt(x.tokens)}</td></tr>`;
+  }).join("") || "<tr><td colspan=4>—</td></tr>";
   const sel = document.getElementById("roleSel");
   const roles = Object.keys(data.by_role).sort();
   if(!sel.options.length || sel.dataset.w !== window_){
@@ -125,11 +176,27 @@ async function load(){
   }
   renderRole();
 }
+function renderOverall(){
+  if (!data) return;
+  const q = (document.getElementById("q").value || "").toLowerCase();
+  const m = me();
+  const max = Math.max(1, ...data.users.map(u=>u.tokens));
+  const rows = data.users.filter(u=>!q || u.username.toLowerCase().includes(q));
+  document.getElementById("overall").innerHTML = rows.map(u=>{
+    const i = data.users.indexOf(u);
+    const cls = [i===0?"leader":"", u.username===m?"me":"", stale(u.last_push)?"stale":""].filter(Boolean).join(" ");
+    const you = u.username===m ? '<span class="you">you</span>' : '';
+    return `<tr class="${cls}" data-u="${esc(u.username)}"><td class="rank">${i+1}</td><td><b>${esc(u.username)}</b>${you}<div class="bar"><i style="width:${(100*u.tokens/max).toFixed(1)}%"></i></div><span class="recency">${esc(rel(u.last_push))}</span></td><td><span class="pill">${esc(u.role)}</span></td><td class="num">${fmt(u.tokens)}</td></tr>`;
+  }).join("") || `<tr><td colspan=4>No pushes yet — run <code>agent-tokens --sync</code>.</td></tr>`;
+  document.querySelectorAll("#overall tr[data-u]").forEach(tr=>{ tr.onclick = ()=>setMe(tr.dataset.u); });
+}
 function renderRole(){
+  if (!data) return;
   const r = document.getElementById("roleSel").value;
-  const rows = (data && data.by_role[r]) || [];
+  const rows = (data.by_role[r]) || [];
+  const m = me();
   document.getElementById("roleBody").innerHTML = rows.map((u,i)=>
-    `<tr class="${i===0?'leader':''}"><td class="rank">${i+1}</td><td><b>${esc(u.username)}</b></td><td class="num">${fmt(u.tokens)}</td><td class="num">${fmt(u.cumulative)}</td></tr>`
+    `<tr class="${[i===0?"leader":"",u.username===m?"me":""].filter(Boolean).join(" ")}"><td class="rank">${i+1}</td><td><b>${esc(u.username)}</b>${u.username===m?'<span class="you">you</span>':''}<span class="recency">${esc(rel(u.last_push))}</span></td><td class="num">${fmt(u.tokens)}</td><td class="num">${fmt(u.cumulative)}</td></tr>`
   ).join("") || "<tr><td colspan=4>No data for this role.</td></tr>";
 }
 document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));b.classList.add("active");window_=b.dataset.w;load();});
