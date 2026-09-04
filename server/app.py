@@ -220,6 +220,8 @@ def window_start(window: str, now: datetime) -> datetime:
             hour=0, minute=0, second=0, microsecond=0
         )
         return monday
+    if window == "all":
+        return datetime(1970, 1, 1, tzinfo=timezone.utc)
     return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
@@ -231,7 +233,7 @@ def _board_cache_invalidate() -> None:
 def leaderboard(window: str = "daily") -> dict:
     now = utcnow()
     key = (window or "daily").lower()
-    if key not in ("daily", "weekly"):
+    if key not in ("daily", "weekly", "all"):
         key = "daily"
     cache_key = (key, str(DB_PATH))
     with _BOARD_LOCK:
@@ -492,7 +494,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, b'{"ok": true}')
         elif parsed.path == "/api/v1/leaderboard":
             window = (qs.get("window", ["daily"])[0] or "daily").lower()
-            if window not in ("daily", "weekly"):
+            if window not in ("daily", "weekly", "all"):
                 window = "daily"
             self._send(200, json.dumps(leaderboard(window)).encode())
         elif parsed.path in ("/", "/index.html"):
