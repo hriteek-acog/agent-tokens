@@ -88,6 +88,15 @@ def render_terminal(
         "OpenCode": G,
         "Claude Code": Y,
         "Antigravity (AGY)": BL,
+        "Codex": G,
+        "Copilot": C,
+        "Cursor": BL,
+        "Gemini CLI": C,
+        "Qwen Code": Y,
+        "Pi": G,
+        "DeepSeek": M,
+        "Cline": Y,
+        "Windsurf": BL,
     }
 
     if not visible_reports or not any(r.models for r in visible_reports):

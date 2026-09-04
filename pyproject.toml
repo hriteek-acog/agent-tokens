@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-tokens"
-version = "1.1.0"
+version = "1.2.0"
 description = "Unified multi-agent token and session tracking CLI across OpenCode, Claude Code, and Antigravity (AGY)."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [
     { name = "Hriteek Roy", email = "hriteekroy1869@gmail.com" }
 ]
-keywords = ["ai-agents", "tokens", "opencode", "claude-code", "antigravity", "llm-metrics"]
+keywords = ["ai-agents", "tokens", "opencode", "claude-code", "antigravity", "codex", "copilot", "cursor", "gemini-cli", "qwen-code", "pi-agent", "deepseek", "cline", "windsurf", "llm-metrics"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",

@@ -6,30 +6,40 @@ import sys
 from typing import List
 
 from agent_tokens import __version__
+from agent_tokens.providers import ALL_PROVIDERS, FLAG_MAP
 from agent_tokens.providers.base import BaseProvider
-from agent_tokens.providers.opencode import OpenCodeProvider
-from agent_tokens.providers.claude import ClaudeCodeProvider
-from agent_tokens.providers.antigravity import AntigravityProvider
 from agent_tokens.formatters import render_terminal, render_json
+
+FILTER_FLAGS = (
+    ("opencode", "Display only OpenCode usage"),
+    ("claude", "Display only Claude Code usage"),
+    ("agy", "Display only Google Antigravity (AGY) usage"),
+    ("codex", "Display only OpenAI Codex usage"),
+    ("copilot", "Display only GitHub Copilot usage"),
+    ("cursor", "Display only Cursor usage"),
+    ("gemini", "Display only Gemini CLI usage"),
+    ("qwen", "Display only Qwen Code usage"),
+    ("pi", "Display only Pi agent usage"),
+    ("deepseek", "Display only DeepSeek harness usage"),
+    ("cline", "Display only Cline usage"),
+    ("windsurf", "Display only Windsurf usage"),
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-tokens",
-        description="Unified token and session analytics across OpenCode, Claude Code, and Antigravity (AGY).",
+        description=(
+            "Unified token and session analytics across 12 coding agents: "
+            "OpenCode, Claude Code, Antigravity (AGY), Codex, Copilot, Cursor, "
+            "Gemini CLI, Qwen Code, Pi, DeepSeek, Cline, and Windsurf."
+        ),
     )
     parser.add_argument(
         "--today", action="store_true", help="Filter metrics to today's active sessions only"
     )
-    parser.add_argument(
-        "--opencode", action="store_true", help="Display only OpenCode usage"
-    )
-    parser.add_argument(
-        "--claude", action="store_true", help="Display only Claude Code usage"
-    )
-    parser.add_argument(
-        "--agy", action="store_true", help="Display only Google Antigravity (AGY) usage"
-    )
+    for flag, help_text in FILTER_FLAGS:
+        parser.add_argument(f"--{flag}", action="store_true", help=help_text)
     parser.add_argument(
         "--json", action="store_true", help="Output machine-readable JSON format"
     )
@@ -68,16 +78,12 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    providers: List[BaseProvider] = []
-    # If specific flags are chosen, only run those
-    filter_set = args.opencode or args.claude or args.agy
-
-    if not filter_set or args.opencode:
-        providers.append(OpenCodeProvider())
-    if not filter_set or args.claude:
-        providers.append(ClaudeCodeProvider())
-    if not filter_set or args.agy:
-        providers.append(AntigravityProvider())
+    # If specific agent flags are chosen, only run those; otherwise all 12.
+    selected = [flag for flag, _ in FILTER_FLAGS if getattr(args, flag)]
+    if selected:
+        providers = [FLAG_MAP[flag]() for flag in selected]
+    else:
+        providers = [cls() for cls in ALL_PROVIDERS]
 
     reports = collect_reports(providers, today_only=args.today)
 
