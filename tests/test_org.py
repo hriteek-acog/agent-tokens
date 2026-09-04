@@ -314,6 +314,65 @@ class TestServer(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     appmod.ingest_snapshot(future)
 
+    def test_leaderboard_cache_invalidates_on_ingest(self):
+        import server.app as appmod
+
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            with mock.patch.object(appmod, "DATA_DIR", data), \
+                 mock.patch.object(appmod, "DB_PATH", data / "leaderboard.db"), \
+                 mock.patch.object(appmod, "LEDGER_PATH", data / "ledger.jsonl"), \
+                 mock.patch.object(appmod, "USERS_JSON", data / "users.json"):
+                appmod._board_cache_invalidate()
+                appmod.ingest_snapshot(
+                    syncmod.build_snapshot("u", "u@aganitha.ai", "other", [_report("Codex", 100)]))
+                first = appmod.leaderboard("daily")
+                self.assertEqual(first["users"][0]["tokens"], 100)
+                cached = appmod.leaderboard("daily")
+                self.assertIs(first, cached)  # TTL hit: same object
+                appmod.ingest_snapshot(
+                    syncmod.build_snapshot("u", "u@aganitha.ai", "other", [_report("Codex", 300)]))
+                second = appmod.leaderboard("daily")
+                self.assertIsNot(first, second)
+                self.assertEqual(second["users"][0]["tokens"], 300)
+
+    def test_ingest_token_gate(self):
+        import server.app as appmod
+
+        with mock.patch.object(appmod, "INGEST_TOKEN", ""):
+            self.assertTrue(appmod._ingest_authorized({}, None))
+        with mock.patch.object(appmod, "INGEST_TOKEN", "s3cret"):
+            self.assertFalse(appmod._ingest_authorized({}, None))
+            self.assertFalse(appmod._ingest_authorized({"token": ["wrong"]}, None))
+            self.assertTrue(appmod._ingest_authorized({"token": ["s3cret"]}, None))
+
+            class _H(dict):
+                def get(self, k, d=""):
+                    return super().get(k, d)
+
+            self.assertTrue(appmod._ingest_authorized({}, _H({"X-Ingest-Token": "s3cret"})))
+            self.assertFalse(appmod._ingest_authorized({}, _H({"X-Ingest-Token": "no"})))
+
+    def test_replay_ledger_rebuilds_empty_db(self):
+        import server.app as appmod
+
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            with mock.patch.object(appmod, "DATA_DIR", data), \
+                 mock.patch.object(appmod, "DB_PATH", data / "leaderboard.db"), \
+                 mock.patch.object(appmod, "LEDGER_PATH", data / "ledger.jsonl"), \
+                 mock.patch.object(appmod, "USERS_JSON", data / "users.json"):
+                appmod.ingest_snapshot(
+                    syncmod.build_snapshot("u", "u@aganitha.ai", "other", [_report("Codex", 500)]))
+                self.assertEqual(len(appmod.leaderboard("daily")["users"]), 1)
+                # Lose the DB (fresh volume): replay restores from the ledger.
+                (data / "leaderboard.db").unlink()
+                appmod._board_cache_invalidate()
+                self.assertEqual(appmod.replay_ledger(), 1)
+                self.assertEqual(appmod.leaderboard("daily")["users"][0]["tokens"], 500)
+                # No-op when the DB is already populated.
+                self.assertEqual(appmod.replay_ledger(), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

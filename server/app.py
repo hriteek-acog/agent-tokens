@@ -7,11 +7,14 @@ Endpoints:
   GET  /                               dashboard UI (single file)
 
 Storage:
-  DATA_DIR (default /data):
-    leaderboard.db   SQLite — snapshots ledger (append-only)
-    ledger.jsonl     raw JSONL mirror (audit trail)
+  DATA_DIR (default /data, shared filesystem):
+    ledger.jsonl     append-only source of truth (audit trail)
     dropbox/         SSH file-drop inbox (polled every 5s)
     users.json       optional admin override {username: role}
+  DB_DIR (default = DATA_DIR; production: container-local volume):
+    leaderboard.db   SQLite working copy, rebuilt from the ledger on startup
+    (SQLite locking is unreliable on NFS, so the DB never lives on shared fs
+    in production — losing it only costs a replay, never data.)
 
 Scoring (cumulative counters -> window deltas):
   Local providers report cumulative all-time totals, so the server converts
@@ -24,11 +27,15 @@ Scoring (cumulative counters -> window deltas):
 Security model:
   * HTTPS ingest trusts the JSON username only as a hint; SSH-dropbox ingest
     prefers the file's UID owner (pwd lookup) — the ssh login — over the body.
+  * POST /api/v1/ingest requires INGEST_TOKEN (query or header) when set;
+    production sets it so direct container-IP POSTs that bypass the LDAP
+    proxy are rejected with 403. Machine clients use the SSH drop and fall
+    back automatically (the CLI treats any non-{"ok": true} reply as failure).
   * users.json (root-managed, from LDAP groups) overrides client-declared role.
-  * DB + ledger live outside the dropbox and are writable only by the server
-    UID; dropbox is mode 1733 (write-only + sticky) so users can create but
-    neither read nor modify each other's files, and files are moved to
-    processed/ after ingest (replay-safe via checksum dedupe).
+  * The ledger on shared fs is append-only (600); dropbox is mode 1733
+    (write-only + sticky) so users can create but neither read nor modify each
+    other's files, and files are consumed once then deleted (checksum dedupe
+    makes replays safe).
 """
 
 import hashlib
@@ -46,12 +53,28 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
-DB_PATH = DATA_DIR / "leaderboard.db"
+# DB_DIR holds the SQLite working copy. On NFS-backed DATA_DIR (e.g. own3's
+# /shared), SQLite locking is flaky long-term, so production mounts a
+# container-local volume here (compose: token-board-db). The ledger on DATA_DIR
+# stays the source of truth — see replay_ledger() — so losing the local DB
+# only costs a rebuild, never data.
+DB_PATH = Path(os.environ.get("DB_DIR", "") or str(DATA_DIR)) / "leaderboard.db"
 LEDGER_PATH = DATA_DIR / "ledger.jsonl"
 DROPBOX = DATA_DIR / "dropbox"
 PROCESSED = DATA_DIR / "processed"
 USERS_JSON = DATA_DIR / "users.json"
 HERE = Path(__file__).resolve().parent
+# POST /api/v1/ingest requires this token (query ?token= or X-Ingest-Token
+# header) when set. Empty = open (dev default). Production sets it via an
+# uncommitted server/.env so direct container-IP POSTs from the cluster —
+# which bypass the LDAP proxy — are rejected; machine clients use the SSH
+# drop (SSH-authenticated) and fall back automatically on 403.
+INGEST_TOKEN = os.environ.get("INGEST_TOKEN", "")
+# Leaderboard result cache TTL (seconds). The dashboard polls every 10s per
+# viewer; without this each poll full-scans the snapshots table.
+LEADERBOARD_TTL_S = int(os.environ.get("LEADERBOARD_TTL_S", "5"))
+_BOARD_CACHE: dict = {}
+_BOARD_LOCK = threading.Lock()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -75,6 +98,7 @@ CREATE INDEX IF NOT EXISTS idx_snap_checksum ON snapshots(checksum);
 
 def db() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
@@ -127,8 +151,11 @@ def safe_text(value: object, field: str) -> str:
     return text
 
 
-def ingest_snapshot(payload: dict, owner_hint: str = "") -> dict:
-    """Validate + append. Returns {'ok': True, 'id': N} or raises ValueError."""
+def ingest_snapshot(payload: dict, owner_hint: str = "", mirror_ledger: bool = True) -> dict:
+    """Validate + append. Returns {'ok': True, 'id': N} or raises ValueError.
+
+    mirror_ledger=False is for replay_ledger(): the record is already in the
+    ledger, so only the SQLite working copy is rebuilt."""
     if not isinstance(payload, dict) or payload.get("schema") != "agent-tokens.snapshot/v1":
         raise ValueError("unknown snapshot schema")
     if not verify(payload):
@@ -176,12 +203,14 @@ def ingest_snapshot(payload: dict, owner_hint: str = "") -> dict:
         snap_id = cur.lastrowid
     finally:
         conn.close()
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        with open(LEDGER_PATH, "a") as fh:
-            fh.write(json.dumps({**payload, "username": username, "role": role}) + "\n")
-    except OSError:
-        pass
+    if mirror_ledger:
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            with open(LEDGER_PATH, "a") as fh:
+                fh.write(json.dumps({**payload, "username": username, "role": role}) + "\n")
+        except OSError:
+            pass
+    _board_cache_invalidate()
     return {"ok": True, "id": snap_id}
 
 
@@ -194,8 +223,28 @@ def window_start(window: str, now: datetime) -> datetime:
     return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def _board_cache_invalidate() -> None:
+    with _BOARD_LOCK:
+        _BOARD_CACHE.clear()
+
+
 def leaderboard(window: str = "daily") -> dict:
     now = utcnow()
+    key = (window or "daily").lower()
+    if key not in ("daily", "weekly"):
+        key = "daily"
+    cache_key = (key, str(DB_PATH))
+    with _BOARD_LOCK:
+        hit = _BOARD_CACHE.get(cache_key)
+        if hit and hit[0] > time.monotonic():
+            return hit[1]
+    data = _compute_leaderboard(key, now)
+    with _BOARD_LOCK:
+        _BOARD_CACHE[cache_key] = (time.monotonic() + LEADERBOARD_TTL_S, data)
+    return data
+
+
+def _compute_leaderboard(window: str, now: datetime) -> dict:
     start = window_start(window, now)
     conn = db()
     try:
@@ -360,6 +409,52 @@ def poll_dropbox_once() -> int:
     return n
 
 
+def replay_ledger() -> int:
+    """Rebuild an empty SQLite working copy from the ledger on DATA_DIR.
+
+    The ledger is the source of truth; the DB is a disposable cache. Runs at
+    startup so a lost local volume (or a fresh DB_DIR) self-heals. Idempotent
+    via checksum dedupe; returns rows (re)played."""
+    conn = db()
+    try:
+        n = conn.execute("SELECT COUNT(*) AS c FROM snapshots").fetchone()["c"]
+    finally:
+        conn.close()
+    if n > 0:
+        return 0
+    replayed = 0
+    try:
+        lines = LEDGER_PATH.read_text().splitlines()
+    except OSError:
+        return 0
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except ValueError:
+            continue
+        try:
+            ingest_snapshot(payload, mirror_ledger=False)
+            replayed += 1
+        except ValueError:
+            continue
+    return replayed
+
+
+def _ingest_authorized(qs: dict, headers) -> bool:
+    """True when POST ingest may proceed. With INGEST_TOKEN set, the caller
+    must present it as ?token= or X-Ingest-Token — this blocks direct
+    container-IP POSTs that bypass the LDAP proxy. Separated for unit tests."""
+    if not INGEST_TOKEN:
+        return True
+    token = (qs.get("token", [""])[0] or "")
+    if not token and headers is not None:
+        token = headers.get("X-Ingest-Token", "") or ""
+    return bool(token) and token == INGEST_TOKEN
+
+
 def dropbox_loop(stop: threading.Event, interval_s: int = 5) -> None:
     while not stop.is_set():
         try:
@@ -421,6 +516,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path != "/api/v1/ingest":
             return self._send(404, b'{"error": "not found"}')
+        qs = urllib.parse.parse_qs(parsed.query)
+        if not _ingest_authorized(qs, self.headers):
+            return self._send(403, b'{"error": "ingest forbidden: bad or missing token"}')
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length > 2_000_000:
             return self._send(413, b'{"error": "payload too large"}')
@@ -428,7 +526,6 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length or 0) or b"{}")
         except Exception:
             return self._send(400, b'{"error": "invalid json"}')
-        qs = urllib.parse.parse_qs(parsed.query)
         owner = (qs.get("owner", [""])[0] or "")
         try:
             result = ingest_snapshot(payload, owner_hint=owner)
@@ -440,6 +537,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     port = int(os.environ.get("PORT", "8734"))
+    replayed = replay_ledger()
+    if replayed:
+        print(f"token-board: replayed {replayed} ledger rows into fresh DB")
     stop = threading.Event()
     threading.Thread(target=dropbox_loop, args=(stop,), daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
