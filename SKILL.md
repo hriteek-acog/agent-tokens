@@ -29,11 +29,10 @@ agent-tokens --sync           # force a push now
 agent-tokens --no-sync        # display without pushing
 ```
 
-Every normal run pushes a full all-agent snapshot to the leaderboard server.
-Transport is automatic: HTTPS POST when the proxy session allows it, otherwise
-SSH file-drop to own3 (`ssh own3 "cat > dropbox/…"`, ingested in ~5s) — the
-live deployment sits behind the LDAP-gated reverse proxy, so the SSH path is
-currently the effective primary. The dashboard refreshes within seconds.
+Every normal run pushes a full all-agent snapshot in the background (display
+filters don't affect it). Transport is automatic: HTTPS first, SSH file-drop
+to own3 on any failure — behind the LDAP proxy the SSH path is the effective
+one (ingested in ~5s). The dashboard refreshes within seconds.
 
 ## 3. Dashboard
 
@@ -44,11 +43,10 @@ currently the effective primary. The dashboard refreshes within seconds.
 ## 4. Debugging sync
 
 ```bash
-agent-tokens --me                                    # identity present?
-agent-tokens --sync                                  # watch [leaderboard] line on stderr
-AGENT_TOKENS_SERVER=https://token-leaderboard.own3.aganitha.ai agent-tokens --sync
-curl https://token-leaderboard.own3.aganitha.ai/api/v1/health
-curl "https://token-leaderboard.own3.aganitha.ai/api/v1/leaderboard?window=daily"
+agent-tokens --me       # identity present?
+agent-tokens --sync     # watch [leaderboard] line on stderr: https vs ssh-drop
+ssh own3 "ls -la /shared/hriteek/token-leaderboard/dropbox/"
+# file gone within ~10s = ingested; still there = check container logs
 ```
 
 Sync never breaks local display: failures print `[leaderboard] sync skipped (...)`
@@ -60,9 +58,8 @@ to stderr and exit code stays 0.
   not to any name inside the JSON.
 - The dropbox is write-only + sticky: users can create but cannot read, edit,
   or delete each other's files.
-- The dashboard reads only the server-owned SQLite DB + append-only ledger;
-  raw drop files are consumed once and removed.
-- Admin role overrides live in `users.json` (derived from LDAP groups) and
-  beat any client-declared role.
-- A user inflating their own counters is visible in the ledger (checksums,
-  host, timestamps) — see `docs/PROS_CONS.md` for residual risks.
+- Machine HTTPS ingest needs `INGEST_TOKEN` (server-side secret); without it
+  the CLI falls back to the SSH drop. Anonymous browser hits land on LDAP login.
+- Admin role overrides live in `users.json` (from LDAP groups) and beat any
+  client-declared role. Self-inflation shows in the ledger — motivational
+  board, not payroll-grade (see `docs/PROS_CONS.md`).

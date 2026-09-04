@@ -2,14 +2,14 @@
 
 ## Architecture
 
-One CLI, one server, one shared dir. The CLI keeps its local-first dashboard
-and adds `onboard / --sync / --me`; every normal run re-scans ALL providers
-in the background and pushes one signed snapshot via HTTPS (instant) with an
-SSH file-drop fallback (offline-friendly). The server (stdlib-only Python,
-single container) validates snapshots, appends them to SQLite + JSONL, polls
-the dropbox, and serves windowed aggregates plus a single-file dark
-benchmark-style dashboard. Records live in `/shared/hriteek/token-leaderboard`
-with write-only sticky permissions so users can submit but never edit.
+One CLI, one server, one shared dir. The CLI keeps its local-first dashboard;
+every normal run re-scans ALL providers in the background and pushes one signed
+snapshot (SSH file-drop, the authenticated path; HTTPS tried first, automatic
+fallback). The server (stdlib-only Python, single container) validates, appends
+to an append-only ledger, serves windowed aggregates + a single-file flat light
+dashboard. Records live in `/shared/hriteek/token-leaderboard` with create-only
+permissions; the SQLite working copy sits on a local volume, rebuilt from the
+ledger on startup.
 
 ## Decisions
 
@@ -49,21 +49,42 @@ the org's existing trust boundary.
 ### Write-only sticky dropbox + consume-once ingest
 **Status:** Accepted
 **Context:** Requirement: "push via ssh, but nobody hand-edits records".
-**Decision:** `dropbox/` is mode 1733; server dedupes by checksum, deletes after
-ingest; dashboard never reads raw files.
-**Alternatives considered:** World-writable JSON per user — rejected (trivial
-history rewriting).
-**Consequences:** Tamper-evident (not tamper-proof for one's own numbers —
-see PROS_CONS.md); needs `setup_shared_dir.sh` run as root once.
+**Decision:** `dropbox/` is mode 1733; server attributes to the file UID owner,
+dedupes by checksum, deletes after ingest; dashboard never reads raw files.
+**Alternatives considered:** World-writable JSON per user — rejected: trivial
+history rewriting.
+**Consequences:** Tamper-evident, not tamper-proof for one's own numbers.
+
+### Per-(user, host) scoring series
+**Status:** Accepted (supersedes plain per-user deltas above)
+**Context:** A fresh laptop's lower cumulative totals zeroed the user's whole
+score when its push landed last; test fixtures did the same.
+**Decision:** Deltas computed per (user, host) series, summed per user.
+**Consequences:** Multi-machine users are correct by construction; single-host
+stale/low pushes still collapse that host's series (accepted: cumulative
+counters have no better oracle).
+
+### INGEST_TOKEN gate on machine HTTPS
+**Status:** Accepted
+**Context:** Bridge IPs are host-routable, so any cluster user could POST as
+anyone, bypassing the LDAP proxy.
+**Decision:** `POST /api/v1/ingest` requires `INGEST_TOKEN` (query/header) when
+set; production sets it via gitignored `server/.env`. Machines use the SSH
+drop; the CLI already falls back on any non-`{"ok": true}` reply.
+**Consequences:** HTTPS machine-push is dormant until per-user tokens exist.
+
+### Local SQLite + ledger replay + result cache
+**Status:** Accepted
+**Context:** SQLite locking is unreliable on NFS-backed `/shared`; per-viewer
+10s polling full-scanned the table per request.
+**Decision:** DB on a container-local volume (ledger stays the source of truth,
+replayed at startup); 5s leaderboard cache, invalidated on ingest.
+**Consequences:** Losing the volume costs a rebuild, never data.
 
 ---
 
 ## Not Doing
 
-- **Per-prompt / cost / billing accounting**: out of scope; totals only.
-- **In-app LDAP password auth**: stays at network/proxy layer for v1; `users.json`
-  is the role bridge. Full LDAP-bind login is a documented follow-up.
-- **Public internet exposure**: internal host + port only; no TLS termination in
-  the container (front with existing cluster nginx if needed).
-- **Migrating the test toolchain**: repo stays on unittest + setuptools (existing
-  convention); no uv/pytest migration in this change.
+- **Per-prompt / cost / billing accounting**: totals only.
+- **In-app LDAP login**: proxy layer owns auth; `users.json` is the role bridge.
+- **Public internet exposure**: internal host only; container traffic is plain HTTP.

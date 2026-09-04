@@ -129,15 +129,9 @@ The username is a **hint** — §7 explains why it can't be trusted alone.
 
 ### 4.1 `scripts/install.sh` (pyenv-safe)
 
-Problem: pyenv shims resolve commands per interpreter, so installing under one
-Python leaves `agent-tokens: command not found` on others. The script:
-
-1. Resolves repo root from its own path (runnable from anywhere).
-2. Collects interpreters: active `python3` + every `pyenv global` version's
-   `~/.pyenv/versions/<v>/bin/python3` (dedupe, macOS-bash-3.2-safe).
-3. `pip install -e <root>` into each; `pyenv rehash` if pyenv exists.
-4. Verifies `agent-tokens --version` resolves; prints onboard + doctor next steps.
-   Exits 1 with a PATH hint if still unresolvable.
+pyenv shims resolve commands per interpreter, so the script installs into the
+active `python3` plus every `pyenv global` version, rehashes, verifies
+`agent-tokens --version` resolves, and prints the onboard next step.
 
 ### 4.2 `agent-tokens doctor` (`doctor.py`)
 
@@ -204,8 +198,10 @@ Order: HTTPS first, SSH-drop fallback (`sync_snapshot()` returns
 ## 7. Server (`server/app.py`, stdlib only)
 
 Single file, `http.server.ThreadingHTTPServer` + `sqlite3`, no pip deps.
-Env: `DATA_DIR` (default `/data`), `PORT` (default `8734`). Files:
-`leaderboard.db`, `ledger.jsonl`, `dropbox/`, `processed/`, `users.json`
+Env: `DATA_DIR` (default `/data`, shared), `DB_DIR` (default = `DATA_DIR`;
+production: container-local volume), `PORT` (default `8734`),
+`INGEST_TOKEN` (default empty = open), `LEADERBOARD_TTL_S` (default 5).
+Shared files: `ledger.jsonl`, `dropbox/`, `processed/`, `users.json`
 (admin `{username: role}` overrides).
 
 ### 7.1 Endpoints
@@ -222,14 +218,15 @@ CORS `*`; OPTIONS handled.
 
 ### 7.2 Ingest validation (`ingest_snapshot`)
 
-1. `schema` must equal `agent-tokens.snapshot/v1`, else `ValueError`.
-2. `verify()` checksum must pass (rejects truncation/tampering).
-3. Username: `owner_hint` (SSH UID, §7.4 / proxy `?owner=`) **wins** over body;
-   lowercased, 1–64 chars.
-4. Role: `users.json[username]` wins over client-declared role.
-5. Plausibility: `0 <= total_tokens <= 10**13`.
-6. Checksum dedupe: existing checksum → return `{ok, id, deduped: True}`.
-7. Append row + mirror full record to `ledger.jsonl` (audit trail).
+Rejects with `ValueError` unless ALL hold:
+
+1. `schema == "agent-tokens.snapshot/v1"`; checksum verifies.
+2. Username `^[a-z0-9._-]{1,64}$` (lowercased); `owner_hint` (SSH UID) wins.
+3. All rendered names (role, host, agent, model) match `^[A-Za-z0-9._\-/ ()]{1,128}$`.
+4. Role: `users.json[username]` wins over client value.
+5. `collected_at` within `[now−30d, now+5m]`; `0 <= every total <= 10**13`.
+6. Checksum dedupe: known checksum → `{ok, id, deduped: True}`.
+7. Append row; mirror to `ledger.jsonl` unless `mirror_ledger=False` (replay).
 
 SQLite DDL (lives in `DB_DIR`, default = `DATA_DIR`; production mounts a
 container-local volume because SQLite locking is unreliable on NFS — see §10):
@@ -287,9 +284,8 @@ needed when the admin owns the parent.
 | Path | Mode | Meaning |
 |---|---|---|
 | `dropbox/` | `1733` (sticky, create-only) | anyone can `ssh host "cat > dropbox/…"`; nobody can list, read, overwrite, or delete others' files |
-| `processed/` | `700` | server only |
-| `ledger.jsonl` | `600` | server only (append-only audit) |
-| `leaderboard.db` | `600` (created at runtime) | server only; dashboard reads it via HTTP, never directly |
+| `processed/` | `700` | server only (`.bad`/`.err` quarantine) |
+| `ledger.jsonl` | `600` | append-only source of truth; SQLite is rebuilt from it |
 | `users.json` | `644`, default `{}` | admin-curated LDAP-group → role map |
 
 Why the server runs as **root** (documented in `server/Dockerfile`): only root
@@ -364,9 +360,8 @@ committed), then `docker compose -f server/docker-compose.yml up -d --build`. Ve
 
 **New user (per machine):** clone → `bash scripts/install.sh` →
 `agent-tokens --onboard --email <name@aganitha.ai> --role <role>` →
-`agent-tokens doctor` (all OK/WARN, no FAIL) → use `agent-tokens` normally.
-First push appears on the board within seconds (SSH path) or after LDAP login
-(HTTPS path).
+`agent-tokens doctor` (no FAIL) → use `agent-tokens` normally. First push
+appears on the board within seconds via the SSH drop.
 
 **Admin:** run `setup_shared_dir.sh` once; keep `users.json` in sync with LDAP
 groups (`ldap_group_to_role` mapping); read incidents from `ledger.jsonl`
@@ -378,15 +373,8 @@ audit), restart.
 
 ## 12. Tests (stdlib `unittest`, `python3 -m unittest discover tests`)
 
-- `test_cli.py`: 12-provider registry, dispatch, failure isolation, JSON output.
-- `test_org.py`: email/role validation, identity round-trip, snapshot
-  build/verify/tamper-reject, HTTPS→SSH fallback, login-HTML rejection,
-  owner-hint + role-override ingest, checksum dedupe, daily-vs-weekly deltas
-  for users/harnesses/models, multi-host summation, doctor exit codes.
-- `test_formatters.py` (+ others): number formatting, zero-row display hiding
-  (JSON unaffected), provider fixtures.
-
-Live verification checklist (§7–§10 each verified on own3 during build):
-onboard → `--today` shows local data → `[leaderboard] synced via ssh-drop` →
-dropbox file consumed ≤10s → leaderboard JSON correct per window → dashboard +
-logo served → public URL LDAP-gated.
+`test_cli.py` (registry, dispatch, failure isolation — never syncs: kill-switch
+is forced in `setUp`); `test_org.py` (identity, snapshot tamper-reject, HTTPS→SSH
+fallback, login-HTML + XSS + timestamp rejection, owner-hint/role-override,
+dedupe, daily/weekly + multi-host deltas, token gate, ledger replay, doctor);
+`test_formatters.py` + provider suites (formatting, zero-row hiding, fixtures).
