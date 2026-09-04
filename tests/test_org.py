@@ -88,6 +88,27 @@ class TestSync(unittest.TestCase):
         self.assertEqual(res["transport"], "ssh-drop")
         s.assert_called_once()
 
+    def test_post_rejects_login_html(self):
+        """own3 proxy 302s anon POSTs to the LDAP login page — HTML must not
+        count as success or sync would silently drop data."""
+        import io as _io
+
+        payload = syncmod.build_snapshot("u", "u@aganitha.ai", "other", [_report()])
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"<html><head><title>Login</title></head></html>"
+
+        with mock.patch.object(syncmod.urllib.request, "urlopen", return_value=_Resp()):
+            with self.assertRaises(RuntimeError):
+                syncmod.post_snapshot(payload, server_url="http://x")
+
 
 class TestCLIOrg(unittest.TestCase):
     def test_me_no_identity(self):

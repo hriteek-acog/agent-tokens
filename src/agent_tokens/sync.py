@@ -129,14 +129,30 @@ def post_snapshot(
     server_url: str = DEFAULT_SERVER_URL,
     timeout_s: int = 10,
 ) -> str:
-    """POST snapshot to server. Returns server response text. Raises on failure."""
+    """POST snapshot to server. Returns server response text. Raises on failure.
+
+    The own3 reverse proxy sits in front of the server with LDAP auth: an
+    unauthenticated POST is 302-redirected to the login page (HTML). That must
+    NOT count as success — so the response is required to be JSON with
+    ``{"ok": true}``; anything else raises and the caller falls back to the
+    SSH file-drop, which bypasses the proxy entirely.
+    """
     url = server_url.rstrip("/") + "/api/v1/ingest"
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"}, method="POST"
     )
     with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-        return resp.read().decode("utf-8", "replace")
+        raw = resp.read().decode("utf-8", "replace")
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        raise RuntimeError(
+            "server did not accept snapshot (non-JSON reply — likely auth redirect)"
+        )
+    if not isinstance(parsed, dict) or parsed.get("ok") is not True:
+        raise RuntimeError(f"server rejected snapshot: {raw[:200]}")
+    return raw
 
 
 def ssh_drop_snapshot(
