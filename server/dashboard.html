@@ -99,7 +99,11 @@ const fmt = n => n >= 1e9 ? (n/1e9).toFixed(2)+"B" : n >= 1e6 ? (n/1e6).toFixed(
 async function load(){
   const r = await fetch("/api/v1/leaderboard?window="+window_);
   data = await r.json();
-  document.getElementById("scope").textContent = window_ === "daily" ? "today" : "this week";
+  const dstr = d => new Date(d).toLocaleDateString(undefined,{month:"short",day:"numeric"});
+  const today = dstr(new Date());
+  document.getElementById("scope").textContent = window_ === "daily"
+    ? "today · " + dstr(data.window_start)
+    : "this week · " + dstr(data.window_start) + " → " + today;
   document.getElementById("gen").textContent = "updated " + new Date(data.generated_at).toLocaleTimeString();
   document.getElementById("count").textContent = data.users.length + " contributors";
   const max = Math.max(1, ...data.users.map(u=>u.tokens));

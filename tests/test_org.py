@@ -137,15 +137,6 @@ class TestCLIOrg(unittest.TestCase):
 
 
 class TestServer(unittest.TestCase):
-    def _fresh_server(self, td):
-        import server.app as appmod
-
-        data = Path(td)
-        with mock.patch.object(appmod, "DATA_DIR", data), \
-             mock.patch.object(appmod, "DB_PATH", data / "leaderboard.db"), \
-             mock.patch.object(appmod, "LEDGER_PATH", data / "ledger.jsonl"), \
-             mock.patch.object(appmod, "USERS_JSON", data / "users.json"):
-            yield appmod
 
     def test_ingest_and_leaderboard(self):
         import server.app as appmod
@@ -192,6 +183,54 @@ class TestServer(unittest.TestCase):
                 appmod.ingest_snapshot(p)
                 lb = appmod.leaderboard("daily")
                 self.assertEqual(lb["users"][0]["role"], "research")
+
+    def test_windows_delta_harness_and_models(self):
+        """Harness/model boards must follow the selected window (daily vs weekly)."""
+        import datetime as _dt
+
+        import server.app as appmod
+
+        def _reps(codex, claude):
+            return [
+                AgentReport(agent_name="Codex", models=[TokenStats(model_id="gpt-5", input_tokens=codex, session_count=1)]),
+                AgentReport(agent_name="Claude Code", models=[TokenStats(model_id="opus", input_tokens=claude, session_count=1)]),
+            ]
+
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            with mock.patch.object(appmod, "DATA_DIR", data), \
+                 mock.patch.object(appmod, "DB_PATH", data / "leaderboard.db"), \
+                 mock.patch.object(appmod, "LEDGER_PATH", data / "ledger.jsonl"), \
+                 mock.patch.object(appmod, "USERS_JSON", data / "users.json"):
+                now = _dt.datetime.now(_dt.timezone.utc)
+                old = syncmod.build_snapshot("u", "u@aganitha.ai", "engineering", _reps(1000, 1000))
+                old["collected_at"] = (now - _dt.timedelta(days=2)).isoformat()
+                old["checksum"] = syncmod.checksum_of(old)
+                new = syncmod.build_snapshot("u", "u@aganitha.ai", "engineering", _reps(3000, 1500))
+                new["collected_at"] = (now - _dt.timedelta(hours=1)).isoformat()
+                new["checksum"] = syncmod.checksum_of(new)
+                appmod.ingest_snapshot(old)
+                appmod.ingest_snapshot(new)
+                daily = appmod.leaderboard("daily")
+                weekly = appmod.leaderboard("weekly")
+                # Daily = today's delta only; weekly = full growth.
+                self.assertEqual(daily["users"][0]["tokens"], 2500)
+                self.assertEqual(weekly["users"][0]["tokens"], 4500)
+                dh = {h["harness"]: h["tokens"] for h in daily["harnesses"]}
+                wh = {h["harness"]: h["tokens"] for h in weekly["harnesses"]}
+                self.assertEqual(dh, {"Codex": 2000, "Claude Code": 500})
+                self.assertEqual(wh, {"Codex": 3000, "Claude Code": 1500})
+                dm = {m["model"]: m["tokens"] for m in daily["models"]}
+                self.assertEqual(dm, {"Codex/gpt-5": 2000, "Claude Code/opus": 500})
+
+    def test_doctor_checks(self):
+        from agent_tokens import doctor as doctormod
+
+        with mock.patch.object(doctormod, "_check_ssh", return_value=("ok", "ssh fine")):
+            with mock.patch.object(doctormod, "_check_server", return_value=("warn", "gated")):
+                with mock.patch("agent_tokens.identity.load_identity", return_value=None):
+                    rc = doctormod.run_doctor()
+        self.assertEqual(rc, 1)  # missing identity -> FAIL
 
 
 if __name__ == "__main__":

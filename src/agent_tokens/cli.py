@@ -68,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--me", action="store_true", help="Show linked org identity and exit"
     )
     parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Preflight: check install, identity, server, and ssh-drop sync",
+    )
+    parser.add_argument(
         "--no-sync",
         action="store_true",
         help="Skip the background leaderboard push for this run",
@@ -105,6 +110,11 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     # --- org identity commands (no provider scan needed) ---
+    if args.doctor:
+        from agent_tokens.doctor import run_doctor
+
+        return run_doctor(server_url=args.server)
+
     if args.me:
         from agent_tokens.identity import load_identity
 

@@ -5,10 +5,13 @@ leaderboard, or debug sync. Keep answers short and run the commands.
 
 ## 1. First-time setup (onboarding)
 
-The user links their machine to the org leaderboard once:
+The user links their machine to the org leaderboard once. If `agent-tokens`
+is not found (pyenv), run the installer first — it covers every local Python:
 
 ```bash
+bash scripts/install.sh   # from the repo clone
 agent-tokens --onboard --email <name@aganitha.ai> --role <role>
+agent-tokens doctor       # preflight: install, identity, server, ssh
 agent-tokens --me
 ```
 

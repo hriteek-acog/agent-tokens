@@ -81,10 +81,12 @@ Where a tool exposes no local token counters, activity (sessions, turns, recency
 
 ## Org leaderboard (token-maxing dashboard)
 
-One-time setup per machine:
+Setup (once per machine — pyenv-safe, installs into every local Python):
 
 ```bash
+bash scripts/install.sh   # or: pip install -e .  (then `pyenv rehash` if needed)
 agent-tokens --onboard --email you@aganitha.ai --role engineering
+agent-tokens doctor       # preflight: install, identity, server, ssh-drop
 agent-tokens --me
 ```
 
