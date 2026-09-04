@@ -12,7 +12,11 @@ from typing import List, Optional
 
 from agent_tokens.models import AgentReport
 from agent_tokens.providers.base import BaseProvider
-from agent_tokens.providers.gemini_cli import build_report, scan_chat_dir
+from agent_tokens.providers.transcripts import (
+    build_token_report,
+    dedupe_chats,
+    scan_transcript_dir,
+)
 
 _MODEL_ID = "deepseek"
 
@@ -39,12 +43,7 @@ class DeepSeekProvider(BaseProvider):
         if not self.is_available():
             return None
         chats = []
-        for d in self.base_dirs:
-            chats.extend(scan_chat_dir(d, today_only))
-        seen = set()
-        uniq = []
-        for c in chats:
-            if c["path"] not in seen:
-                seen.add(c["path"])
-                uniq.append(c)
-        return build_report(self.name, _MODEL_ID, uniq)
+        for directory in self.base_dirs:
+            chats.extend(scan_transcript_dir(directory, today_only))
+        chats = dedupe_chats(chats)
+        return build_token_report(self.name, _MODEL_ID, chats, default_title="deepseek-session")

@@ -12,8 +12,9 @@ from datetime import datetime
 from typing import List, Optional
 from urllib.parse import unquote, urlparse
 
-from agent_tokens.models import AgentReport, TokenStats, SessionInfo
+from agent_tokens.models import AgentReport, SessionInfo
 from agent_tokens.providers.base import BaseProvider
+from agent_tokens.providers.transcripts import build_activity_report
 
 _MODEL_ID = "cursor-composer"
 
@@ -63,7 +64,6 @@ class CursorProvider(BaseProvider):
             return None
 
         sessions: List[SessionInfo] = []
-        last_active = ""
         today = datetime.now().date()
         try:
             entries = sorted(os.listdir(root))
@@ -81,7 +81,6 @@ class CursorProvider(BaseProvider):
             if today_only and mtime.date() != today:
                 continue
             stamp = mtime.strftime("%Y-%m-%d %H:%M:%S")
-            last_active = max(last_active, stamp)
             title = _workspace_title(os.path.join(full, "workspace.json"), entry[:18])
             sessions.append(
                 SessionInfo(
@@ -92,16 +91,4 @@ class CursorProvider(BaseProvider):
                 )
             )
 
-        sessions.sort(key=lambda s: s.updated_at or "", reverse=True)
-        models = []
-        if sessions:
-            models.append(
-                TokenStats(
-                    model_id=_MODEL_ID,
-                    session_count=len(sessions),
-                    last_active=last_active or None,
-                )
-            )
-        return AgentReport(
-            agent_name=self.name, models=models, recent_sessions=sessions[:25]
-        )
+        return build_activity_report(self.name, _MODEL_ID, sessions)

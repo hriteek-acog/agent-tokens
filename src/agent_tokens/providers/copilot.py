@@ -3,6 +3,7 @@
 import glob
 import json
 import os
+import sqlite3
 from typing import Dict, List, Optional
 
 from agent_tokens.models import AgentReport, TokenStats, SessionInfo
@@ -136,7 +137,7 @@ class CopilotProvider(BaseProvider):
                         "SELECT id, cwd, repository, summary, agent_name,"
                         " created_at, updated_at FROM sessions"
                     )
-                except Exception:
+                except sqlite3.Error:
                     return out
                 rows = cur.fetchall()
                 turn_counts: Dict[str, int] = {}
@@ -145,9 +146,9 @@ class CopilotProvider(BaseProvider):
                         "SELECT session_id, COUNT(*) FROM turns GROUP BY session_id"
                     ):
                         turn_counts[r[0]] = safe_int(r[1])
-                except Exception:
+                except sqlite3.Error:
                     pass
-        except Exception:
+        except (sqlite3.Error, OSError):
             return out
         for r in rows:
             stamp = r["updated_at"] or r["created_at"]

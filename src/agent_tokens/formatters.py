@@ -24,10 +24,6 @@ def _colors_enabled(use_color: bool) -> bool:
     return True
 
 
-def _paint(text: str, code: str, enabled: bool) -> str:
-    return f"{code}{text}{RESET}" if enabled else text
-
-
 def format_number(n: object) -> str:
     """Convert large integer counts into compact human-readable strings (e.g. 1.25M, 450K)."""
     if isinstance(n, bool):
@@ -78,7 +74,7 @@ def render_terminal(
 
     lines = []
     lines.append(f"\n{B}{C}════════════════════════════════════════════════════════════════════════════════{R}")
-    lines.append(f"{B}{C}                    🤖 MULTI-AGENT TOKEN TRACKER ({time_scope}){R}")
+    lines.append(f"{B}{C}                    MULTI-AGENT TOKEN TRACKER ({time_scope}){R}")
     lines.append(f"{B}{C}════════════════════════════════════════════════════════════════════════════════{R}\n")
 
     grand_total_tokens = 0
@@ -158,7 +154,7 @@ def render_terminal(
 
     lines.append(f"{B}{M}════════════════════════════════════════════════════════════════════════════════{R}")
     lines.append(
-        f"{B}🎯 GRAND TOTAL TOKENS PROCESSED ({time_scope}): {G}{format_number(grand_total_tokens)}{R} "
+        f"{B}GRAND TOTAL TOKENS PROCESSED ({time_scope}): {G}{format_number(grand_total_tokens)}{R} "
         f"{D}({grand_total_tokens:,} tokens){R}"
     )
     lines.append(f"{B}{M}════════════════════════════════════════════════════════════════════════════════{R}\n")

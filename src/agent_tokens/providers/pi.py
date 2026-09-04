@@ -1,16 +1,22 @@
 """Provider for the Pi coding agent's local session transcripts."""
 
 import os
-from typing import List, Optional
+from typing import FrozenSet, List, Optional
 
 from agent_tokens.models import AgentReport
 from agent_tokens.providers.base import BaseProvider
-from agent_tokens.providers.gemini_cli import build_report, scan_chat_dir
+from agent_tokens.providers.transcripts import (
+    build_token_report,
+    dedupe_chats,
+    scan_transcript_dir,
+)
 
 _MODEL_ID = "pi-agent"
 
 # Directories that hold install artefacts (skills, plugins), never sessions.
-_NON_SESSION_SEGMENTS = {"skills", "vendor", "plugins", "extensions", "node_modules"}
+_NON_SESSION_SEGMENTS: FrozenSet[str] = frozenset(
+    {"skills", "vendor", "plugins", "extensions", "node_modules"}
+)
 
 
 class PiProvider(BaseProvider):
@@ -43,17 +49,9 @@ class PiProvider(BaseProvider):
         if not self.is_available():
             return None
         chats = []
-        for d in self.candidate_dirs():
-            chats.extend(scan_chat_dir(d, today_only))
-        # scan_chat_dir(base) already recurses into subdirs; dedupe by path
-        # and drop install artefacts (skills metadata etc.).
-        seen = set()
-        uniq = []
-        for c in chats:
-            parts = set(c["path"].split(os.sep))
-            if parts & _NON_SESSION_SEGMENTS:
-                continue
-            if c["path"] not in seen:
-                seen.add(c["path"])
-                uniq.append(c)
-        return build_report(self.name, _MODEL_ID, uniq)
+        for directory in self.candidate_dirs():
+            chats.extend(scan_transcript_dir(directory, today_only))
+        # candidate_dirs() recurses, so dedupe and drop install artefacts
+        # (skills metadata etc.).
+        chats = dedupe_chats(chats, exclude_segments=_NON_SESSION_SEGMENTS)
+        return build_token_report(self.name, _MODEL_ID, chats, default_title="pi-session")

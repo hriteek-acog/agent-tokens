@@ -10,7 +10,7 @@ from typing import Optional
 
 from agent_tokens.models import AgentReport
 from agent_tokens.providers.base import BaseProvider
-from agent_tokens.providers.gemini_cli import build_report, scan_chat_dir
+from agent_tokens.providers.transcripts import build_token_report, scan_transcript_dir
 
 _MODEL_ID = "qwen-code"
 
@@ -31,5 +31,5 @@ class QwenProvider(BaseProvider):
     def get_report(self, today_only: bool = False) -> Optional[AgentReport]:
         if not self.is_available():
             return None
-        chats = scan_chat_dir(self.tmp_dir, today_only)
-        return build_report(self.name, _MODEL_ID, chats)
+        chats = scan_transcript_dir(self.tmp_dir, today_only)
+        return build_token_report(self.name, _MODEL_ID, chats, default_title="qwen-chat")

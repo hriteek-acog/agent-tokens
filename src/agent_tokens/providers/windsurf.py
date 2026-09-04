@@ -11,8 +11,9 @@ import os
 from datetime import datetime
 from typing import List, Optional
 
-from agent_tokens.models import AgentReport, TokenStats, SessionInfo
+from agent_tokens.models import AgentReport, SessionInfo
 from agent_tokens.providers.base import BaseProvider
+from agent_tokens.providers.transcripts import build_activity_report
 
 _MODEL_ID = "windsurf-chat"
 
@@ -35,12 +36,11 @@ class WindsurfProvider(BaseProvider):
             return None
 
         sessions: List[SessionInfo] = []
-        last_active = ""
         today = datetime.now().date()
         try:
             files = sorted(glob.glob(os.path.join(self.state_dir, "*.pb")))
         except OSError:
-            return AgentReport(agent_name=self.name)
+            return build_activity_report(self.name, _MODEL_ID, [])
 
         for path in files:
             try:
@@ -50,7 +50,6 @@ class WindsurfProvider(BaseProvider):
             if today_only and mtime.date() != today:
                 continue
             stamp = mtime.strftime("%Y-%m-%d %H:%M:%S")
-            last_active = max(last_active, stamp)
             base = os.path.basename(path)
             # Files look like codeium_chat_state_file_<path with _>.pb
             title = base
@@ -69,16 +68,4 @@ class WindsurfProvider(BaseProvider):
                 )
             )
 
-        sessions.sort(key=lambda s: s.updated_at or "", reverse=True)
-        models = []
-        if sessions:
-            models.append(
-                TokenStats(
-                    model_id=_MODEL_ID,
-                    session_count=len(sessions),
-                    last_active=last_active or None,
-                )
-            )
-        return AgentReport(
-            agent_name=self.name, models=models, recent_sessions=sessions[:25]
-        )
+        return build_activity_report(self.name, _MODEL_ID, sessions)
