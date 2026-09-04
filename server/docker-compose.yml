@@ -7,8 +7,21 @@
 #     https://token-leaderboard.own3.aganitha.ai (container_name = subdomain).
 #   * Labels: user / description / port (internal container port) / security.
 # =============================================================================
+# Storage:
+#   /data (bind-mount, shared fs): ledger.jsonl (source of truth), dropbox/,
+#     processed/, users.json
+#   /dbdata (named volume, container-local): leaderboard.db working copy.
+#     SQLite locking is unreliable on NFS, so the DB never lives on shared fs.
+#     On startup the server rebuilds an empty DB by replaying the ledger.
+# Secrets:
+#   INGEST_TOKEN gates POST /api/v1/ingest (403 without it), blocking direct
+#   container-IP POSTs that bypass the LDAP proxy. Set it in server/.env
+#   (gitignored — never commit it). Machine clients need no token: they sync
+#   via the SSH drop and treat any non-JSON reply as fallback.
+# =============================================================================
 # Deploy (on own3, from the repo root):
 #   bash scripts/setup_shared_dir.sh
+#   test -f server/.env || (echo "INGEST_TOKEN=$(python3 -c 'import secrets;print(secrets.token_hex(32))')" > server/.env && chmod 600 server/.env)
 #   docker compose -f server/docker-compose.yml up -d --build
 # Open: https://token-leaderboard.own3.aganitha.ai
 # =============================================================================
@@ -24,13 +37,22 @@ services:
     restart: unless-stopped
     environment:
       - DATA_DIR=/data
+      - DB_DIR=/dbdata
       - PORT=8734
+      - INGEST_TOKEN=${INGEST_TOKEN:-}
+      - LEADERBOARD_TTL_S=5
     volumes:
       # Bind-mount the shared record dir so snapshots survive restarts and are
       # visible on the cluster filesystem. Created by setup_shared_dir.sh.
       - /shared/hriteek/token-leaderboard:/data
+      # Local volume for the SQLite working copy (see header note).
+      - token-board-db:/dbdata
     labels:
       user: "hriteek"
       description: "Aganitha agent token-maxing leaderboard"
       port: "8734"
       security: "ldap"
+
+volumes:
+  token-board-db:
+    driver: local
