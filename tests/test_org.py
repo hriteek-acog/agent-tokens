@@ -223,6 +223,30 @@ class TestServer(unittest.TestCase):
                 dm = {m["model"]: m["tokens"] for m in daily["models"]}
                 self.assertEqual(dm, {"Codex/gpt-5": 2000, "Claude Code/opus": 500})
 
+    def test_multi_host_series_sum(self):
+        """Two machines, same user: scores sum per host series, so a fresh
+        laptop with lower counters can never zero the main machine's score."""
+        import server.app as appmod
+
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            with mock.patch.object(appmod, "DATA_DIR", data), \
+                 mock.patch.object(appmod, "DB_PATH", data / "leaderboard.db"), \
+                 mock.patch.object(appmod, "LEDGER_PATH", data / "ledger.jsonl"), \
+                 mock.patch.object(appmod, "USERS_JSON", data / "users.json"):
+                big = syncmod.build_snapshot("u", "u@aganitha.ai", "engineering", [_report("Codex", 100000)])
+                big["host"] = "laptop-pro"
+                big["checksum"] = syncmod.checksum_of(big)
+                small = syncmod.build_snapshot("u", "u@aganitha.ai", "engineering", [_report("Codex", 100)])
+                small["host"] = "fresh-laptop"
+                small["checksum"] = syncmod.checksum_of(small)
+                appmod.ingest_snapshot(big)
+                appmod.ingest_snapshot(small)  # newer, lower — must not wipe score
+                lb = appmod.leaderboard("daily")
+                self.assertEqual(len(lb["users"]), 1)
+                self.assertEqual(lb["users"][0]["tokens"], 100100)
+                self.assertEqual(lb["users"][0]["pushes"], 2)
+
     def test_doctor_checks(self):
         from agent_tokens import doctor as doctormod
 

@@ -184,50 +184,61 @@ def leaderboard(window: str = "daily") -> dict:
     finally:
         conn.close()
 
-    per_user: dict = {}
+    per_series: dict = {}
     for r in rows:
-        per_user.setdefault(r["username"], []).append(dict(r))
+        per_series.setdefault((r["username"], r["host"] or ""), []).append(dict(r))
 
     users, harness_tot, model_tot, role_tot = [], {}, {}, {}
-    for username, snaps in per_user.items():
-        snaps.sort(key=lambda s: s["collected_at"])
-        base = None
-        base_models: dict = {}
-        base_agents: dict = {}
-        for s in snaps:
-            if parse_ts(s["collected_at"]) < start:
-                base = s
-                base_models = {(m.get("agent_name"), m.get("model_id")): m.get("total_tokens", 0)
-                               for m in _loads(s["models_json"])}
-                base_agents = {a.get("agent_name"): a.get("total_tokens", 0)
-                               for a in _loads(s["agents_json"])}
-        in_window = [s for s in snaps if parse_ts(s["collected_at"]) >= start]
-        if not in_window:
+    series_by_user: dict = {}
+    for (username, host), snaps in per_series.items():
+        series_by_user.setdefault(username, []).append((host, snaps))
+    for username, series in series_by_user.items():
+        user_score, user_cum, pushes = 0, 0, 0
+        last_push, email, role = "", "", "other"
+        for host, snaps in series:
+            snaps.sort(key=lambda s: s["collected_at"])
+            base = None
+            base_models: dict = {}
+            base_agents: dict = {}
+            for s in snaps:
+                if parse_ts(s["collected_at"]) < start:
+                    base = s
+                    base_models = {(m.get("agent_name"), m.get("model_id")): m.get("total_tokens", 0)
+                                   for m in _loads(s["models_json"])}
+                    base_agents = {a.get("agent_name"): a.get("total_tokens", 0)
+                                   for a in _loads(s["agents_json"])}
+            in_window = [s for s in snaps if parse_ts(s["collected_at"]) >= start]
+            if not in_window:
+                continue
+            latest = in_window[-1]
+            base_total = base["total_tokens"] if base else 0
+            user_score += max(0, latest["total_tokens"] - base_total)
+            user_cum += latest["total_tokens"]
+            pushes += len(in_window)
+            if latest["collected_at"] >= last_push:
+                last_push, email, role = latest["collected_at"], latest["email"], latest["role"]
+            for m in _loads(latest["models_json"]):
+                key = f"{m.get('agent_name')}/{m.get('model_id')}"
+                prev = base_models.get((m.get("agent_name"), m.get("model_id")), 0) if base else 0
+                d = max(0, m.get("total_tokens", 0) - prev)
+                entry = model_tot.setdefault(key, {"tokens": 0, "sessions": 0})
+                entry["tokens"] += d
+                entry["sessions"] += m.get("session_count", 0) or 0
+            for a in _loads(latest["agents_json"]):
+                prev = base_agents.get(a.get("agent_name"), 0) if base else 0
+                harness_tot[a.get("agent_name")] = harness_tot.get(a.get("agent_name"), 0) + max(
+                    0, a.get("total_tokens", 0) - prev)
+        if pushes == 0:
             continue
-        latest = in_window[-1]
-        base_total = base["total_tokens"] if base else 0
-        score = max(0, latest["total_tokens"] - base_total)
-        role = latest["role"]
+        role_tot[role] = role_tot.get(role, 0) + user_score
         users.append({
             "username": username, "role": role,
-            "email": latest["email"], "host": latest["host"],
-            "tokens": score,
-            "cumulative": latest["total_tokens"],
-            "pushes": len(in_window),
-            "last_push": latest["collected_at"],
+            "email": email, "host": "",
+            "tokens": user_score,
+            "cumulative": user_cum,
+            "pushes": pushes,
+            "last_push": last_push,
         })
-        role_tot[role] = role_tot.get(role, 0) + score
-        for m in _loads(latest["models_json"]):
-            key = f"{m.get('agent_name')}/{m.get('model_id')}"
-            prev = base_models.get((m.get("agent_name"), m.get("model_id")), 0) if base else 0
-            d = max(0, m.get("total_tokens", 0) - prev)
-            entry = model_tot.setdefault(key, {"tokens": 0, "sessions": 0})
-            entry["tokens"] += d
-            entry["sessions"] += m.get("session_count", 0) or 0
-        for a in _loads(latest["agents_json"]):
-            prev = base_agents.get(a.get("agent_name"), 0) if base else 0
-            harness_tot[a.get("agent_name")] = harness_tot.get(a.get("agent_name"), 0) + max(
-                0, a.get("total_tokens", 0) - prev)
 
     users.sort(key=lambda u: u["tokens"], reverse=True)
     for i, u in enumerate(users, 1):
