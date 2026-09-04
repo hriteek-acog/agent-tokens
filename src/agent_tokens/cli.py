@@ -51,6 +51,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
     )
+    # --- org leaderboard ---
+    parser.add_argument(
+        "--onboard",
+        action="store_true",
+        help="First-run setup: link this machine to your org identity",
+    )
+    parser.add_argument("--email", default=None, help="Org email for --onboard")
+    parser.add_argument("--role", default=None, help="Role for --onboard")
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="Push a full snapshot to the org leaderboard server now",
+    )
+    parser.add_argument(
+        "--me", action="store_true", help="Show linked org identity and exit"
+    )
+    parser.add_argument(
+        "--no-sync",
+        action="store_true",
+        help="Skip the background leaderboard push for this run",
+    )
+    parser.add_argument(
+        "--server",
+        default=None,
+        help="Leaderboard server base URL (default: $AGENT_TOKENS_SERVER)",
+    )
     return parser
 
 
@@ -78,7 +104,34 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # If specific agent flags are chosen, only run those; otherwise all 12.
+    # --- org identity commands (no provider scan needed) ---
+    if args.me:
+        from agent_tokens.identity import load_identity
+
+        ident = load_identity()
+        if not ident:
+            print("No org identity linked. Run: agent-tokens --onboard --email you@aganitha.ai --role engineering")
+            return 1
+        print(f"{ident.username} <{ident.email}> [{ident.role}] verified={ident.verified}")
+        return 0
+
+    if args.onboard:
+        from agent_tokens.identity import onboard as do_onboard
+
+        if not args.email or not args.role:
+            print("Usage: agent-tokens --onboard --email you@aganitha.ai --role engineering", file=sys.stderr)
+            return 2
+        try:
+            ident = do_onboard(args.email, args.role)
+        except ValueError as exc:
+            print(f"onboard failed: {exc}", file=sys.stderr)
+            return 2
+        print(f"Linked {ident.username} <{ident.email}> [{ident.role}]")
+        print("Dashboard identity ready. Your usage will now sync on every run.")
+        return 0
+
+    # If specific agent flags are chosen, only DISPLAY those; a full background
+    # scan still runs for the org snapshot (see _maybe_sync below).
     selected = [flag for flag, _ in FILTER_FLAGS if getattr(args, flag)]
     if selected:
         providers = [FLAG_MAP[flag]() for flag in selected]
@@ -100,7 +153,37 @@ def main(argv=None) -> int:
                 + ", ".join(p.name for p in providers),
                 file=sys.stderr,
             )
+
+    # --- org sync: every normal run pushes a FULL all-agent snapshot ---
+    sync_requested = args.sync or not args.no_sync
+    if sync_requested:
+        _maybe_sync(selected_filter=selected, server_url=args.server)
     return 0
+
+
+def _maybe_sync(selected_filter, server_url=None) -> None:
+    """Best-effort background push. Never breaks the local display path."""
+    try:
+        from agent_tokens import identity as _ident
+        from agent_tokens import sync as _sync
+
+        ident = _ident.load_identity()
+        if not ident:
+            return  # not onboarded yet — stay silent, stay local
+        # Full scan regardless of display filter: leaderboard sees everything.
+        full_providers = [cls() for cls in ALL_PROVIDERS]
+        full_reports = collect_reports(full_providers, today_only=False)
+        payload = _sync.build_snapshot(
+            ident.username, ident.email, ident.role, full_reports,
+            client_version=__version__,
+        )
+        server = server_url or _sync.DEFAULT_SERVER_URL
+        if os.environ.get("AGENT_TOKENS_NO_SYNC") == "1":
+            return
+        result = _sync.sync_snapshot(payload, server_url=server)
+        print(f"[leaderboard] synced via {result['transport']}", file=sys.stderr)
+    except Exception as exc:  # sync must never fail the CLI
+        print(f"[leaderboard] sync skipped ({exc})", file=sys.stderr)
 
 
 if __name__ == "__main__":

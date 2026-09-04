@@ -79,6 +79,30 @@ Where a tool exposes no local token counters, activity (sessions, turns, recency
      "total_tokens": 830600, "updated_at": "2026-08-29 19:19:47" }] }]
 ```
 
+## Org leaderboard (token-maxing dashboard)
+
+One-time setup per machine:
+
+```bash
+agent-tokens --onboard --email you@aganitha.ai --role engineering
+agent-tokens --me
+```
+
+After that every `agent-tokens` run (any filter) pushes a full all-agent
+snapshot to the org server in the background — HTTPS POST first, SSH
+file-drop to own3 as fallback. Force it with `agent-tokens --sync`, skip it
+with `agent-tokens --no-sync`. Sync never breaks local display.
+
+Dashboard: `http://own3.aganitha.ai:8734` — Daily/Weekly overall, role-wise,
+harness, and model boards (see `SKILL.md`, `docs/design.md`, `docs/PROS_CONS.md`).
+
+Deploy (on own3, as root/sudoer):
+
+```bash
+sudo bash scripts/setup_shared_dir.sh
+docker compose -f server/docker-compose.yml up -d --build
+```
+
 ## Development
 
 ```bash

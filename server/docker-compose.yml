@@ -1,0 +1,39 @@
+# =============================================================================
+# agent-tokens leaderboard — Docker Compose (own3 / US cluster)
+# =============================================================================
+# Services:
+#   - board: leaderboard server + dashboard UI (:8734)
+# =============================================================================
+# Deploy:
+#   sudo bash scripts/setup_shared_dir.sh
+#   docker compose -f server/docker-compose.yml up -d --build
+# Open: http://own3.aganitha.ai:8734  (or <us-host>:8734)
+# =============================================================================
+
+services:
+  board:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    container_name: token-leaderboard
+    environment:
+      - DATA_DIR=/data
+      - PORT=8734
+    volumes:
+      # Bind-mount the shared record dir so snapshots survive restarts and are
+      # visible on the cluster filesystem. Created by setup_shared_dir.sh.
+      - /shared/hriteek/token-leaderboard:/data
+    ports:
+      - "8734:8734"
+    networks:
+      - token-board-network
+    restart: unless-stopped
+    labels:
+      - "user=${USER}"
+      - "description=agent-tokens org leaderboard"
+      - "port=8734"
+      - "exclude=true"
+
+networks:
+  token-board-network:
+    driver: bridge
