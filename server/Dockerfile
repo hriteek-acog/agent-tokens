@@ -9,15 +9,14 @@ WORKDIR /app
 COPY server/app.py ./app.py
 COPY server/dashboard.html ./dashboard.html
 
-RUN mkdir -p /data/dropbox /data/processed && \
-    useradd --system --uid 1001 --create-home board && \
-    chown -R board:board /app
+# NOTE: runs as root ON PURPOSE. The dropbox is mode 1733 (create-only for
+# everyone else): only root (or the dir owner) can list/read/unlink all
+# submissions for ingest. A non-root server user could never see drop files.
+# The trust boundary is the LDAP-gated reverse proxy + labels, not the uid.
 
 ENV DATA_DIR=/data \
     PORT=8734
 
 EXPOSE 8734
-
-USER board
 
 CMD ["python3", "app.py"]
