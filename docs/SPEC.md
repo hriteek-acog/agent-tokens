@@ -131,7 +131,9 @@ The username is a **hint** — §7 explains why it can't be trusted alone.
 
 pyenv shims resolve commands per interpreter, so the script installs into the
 active `python3` plus every `pyenv global` version, rehashes, verifies
-`agent-tokens --version` resolves, and prints the onboard next step.
+`agent-tokens --version` resolves, and prints the onboard next step. Homebrew /
+PEP 668 Pythons are retried once with `--break-system-packages` (safe: zero
+runtime dependencies); other failures abort with the pip output.
 
 ### 4.2 `agent-tokens doctor` (`doctor.py`)
 
