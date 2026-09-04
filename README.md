@@ -50,6 +50,7 @@ Totals = input + output + reasoning + cache reads + cache writes. Tools without 
 
 ```bash
 bash scripts/setup_shared_dir.sh
+test -f server/.env || (echo "INGEST_TOKEN=$(python3 -c 'import secrets;print(secrets.token_hex(32))')" > server/.env && chmod 600 server/.env)
 docker compose -f server/docker-compose.yml up -d --build
 ```
 

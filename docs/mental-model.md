@@ -9,8 +9,9 @@
 - **Snapshot**: one signed JSON document per push — full all-agent totals +
   per-model breakdown + sha256 checksum. It is the only thing that crosses the
   network.
-- **Ledger**: append-only server history (SQLite `snapshots` + `ledger.jsonl`).
-  Snapshots are never updated or deleted; replays dedupe by checksum.
+- **Ledger**: append-only `ledger.jsonl` — the source of truth. Snapshots are
+  never updated; replays dedupe by checksum. The SQLite DB is a disposable
+  working copy (rebuilt from the ledger, may live on a local volume).
 - **Leaderboard window**: daily (since midnight UTC) or weekly (since Monday UTC).
   Scores are *deltas* — latest cumulative in window minus the baseline just
   before the window — because local counters are cumulative.
@@ -22,14 +23,16 @@
 
 - Local display never depends on the network; sync failures never change CLI exit code.
 - Display filters never affect what is synced — every push is a FULL all-agent scan.
-- The dashboard reads only the server-owned DB; raw drop files never render directly.
+- Scores sum per-(user, host) deltas — one machine's stale numbers can't zero another's.
+- The dashboard reads only server-owned state; raw drop files never render directly.
 - SSH UID (or admin `users.json`) always beats any client-declared username/role.
 
 ## Responsibilities
 
 - CLI: measure locally, display locally, push a signed snapshot best-effort.
-- Server: validate (schema + checksum + plausibility), append to ledger,
-  serve windowed aggregates + single-file dashboard.
+- Server: validate (schema, checksum, charset, clock, plausibility), append to
+  ledger, serve cached windowed aggregates + single-file dashboard; machine
+  ingest additionally requires the ingest token.
 - Deploy scripts: create the shared dir with tamper-evident permissions.
 
 ## Boundaries
