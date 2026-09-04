@@ -111,6 +111,14 @@ class TestSync(unittest.TestCase):
 
 
 class TestCLIOrg(unittest.TestCase):
+    def setUp(self):
+        # Same guard as test_cli: main() must never sync from unit tests.
+        self._env = mock.patch.dict(os.environ, {"AGENT_TOKENS_NO_SYNC": "1"})
+        self._env.start()
+
+    def tearDown(self):
+        self._env.stop()
+
     def test_me_no_identity(self):
         with mock.patch("agent_tokens.identity.load_identity", return_value=None):
             out = io.StringIO()

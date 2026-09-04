@@ -173,6 +173,8 @@ def main(argv=None) -> int:
 
 def _maybe_sync(selected_filter, server_url=None) -> None:
     """Best-effort background push. Never breaks the local display path."""
+    if os.environ.get("AGENT_TOKENS_NO_SYNC") == "1":
+        return  # hard kill-switch: tests and scripts set this, checked first
     try:
         from agent_tokens import identity as _ident
         from agent_tokens import sync as _sync
@@ -188,8 +190,6 @@ def _maybe_sync(selected_filter, server_url=None) -> None:
             client_version=__version__,
         )
         server = server_url or _sync.DEFAULT_SERVER_URL
-        if os.environ.get("AGENT_TOKENS_NO_SYNC") == "1":
-            return
         result = _sync.sync_snapshot(payload, server_url=server)
         print(f"[leaderboard] synced via {result['transport']}", file=sys.stderr)
     except Exception as exc:  # sync must never fail the CLI
