@@ -64,30 +64,9 @@ def build_snapshot(
         if rep is None:
             continue
         agent_total = 0
-        rep_models = []
         for m in getattr(rep, "models", []) or []:
-            mt = (
-                (m.input_tokens or 0)
-                + (m.output_tokens or 0)
-                + (m.reasoning_tokens or 0)
-                + (m.cache_read_tokens or 0)
-                + (m.cache_write_tokens or 0)
-            )
+            mt = m.total_tokens  # single formula lives on TokenStats
             agent_total += mt
-            rep_models.append(
-                {
-                    "model_id": m.model_id,
-                    "input_tokens": m.input_tokens or 0,
-                    "output_tokens": m.output_tokens or 0,
-                    "reasoning_tokens": m.reasoning_tokens or 0,
-                    "cache_read_tokens": m.cache_read_tokens or 0,
-                    "cache_write_tokens": m.cache_write_tokens or 0,
-                    "total_tokens": mt,
-                    "session_count": m.session_count or 0,
-                    "turn_count": m.turn_count or 0,
-                    "last_active": m.last_active,
-                }
-            )
             models.append(
                 {
                     "agent_name": getattr(rep, "agent_name", "unknown"),

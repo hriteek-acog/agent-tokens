@@ -109,7 +109,7 @@ def run_doctor(server_url=None, ssh_host=None, remote_dir=None) -> int:
         print(f"[{status.upper():4}] {name}: {detail}")
     if worst == 0:
         print("doctor: all good — usage will sync.")
-    elif checks[1][1][0] == FAIL or checks[3][1][0] == FAIL and checks[2][1][0] == FAIL:
+    elif worst == 2:
         print("doctor: cannot sync yet — fix the FAIL lines above.")
     else:
         print("doctor: usable — at least one sync transport works.")

@@ -36,6 +36,7 @@ import html
 import json
 import os
 import pwd
+import re
 import sqlite3
 import threading
 import time
@@ -113,6 +114,19 @@ def role_overrides() -> dict:
         return {}
 
 
+# Allowlist for every free-text field that ends up rendered in the dashboard.
+# The dashboard builds rows with innerHTML (plus escapeHtml), but stored-XSS
+# prevention belongs server-side: anything outside this set is rejected.
+SAFE_TEXT = re.compile(r"^[A-Za-z0-9._\-/ ()]{1,128}$")
+
+
+def safe_text(value: object, field: str) -> str:
+    text = str(value if value is not None else "").strip()
+    if not SAFE_TEXT.match(text):
+        raise ValueError(f"bad {field}: {text[:60]!r}")
+    return text
+
+
 def ingest_snapshot(payload: dict, owner_hint: str = "") -> dict:
     """Validate + append. Returns {'ok': True, 'id': N} or raises ValueError."""
     if not isinstance(payload, dict) or payload.get("schema") != "agent-tokens.snapshot/v1":
@@ -122,14 +136,23 @@ def ingest_snapshot(payload: dict, owner_hint: str = "") -> dict:
     username = str(payload.get("username", "")).strip().lower()
     if owner_hint:
         username = owner_hint.strip().lower()  # SSH UID wins over body
-    if not username or len(username) > 64:
+    if not re.match(r"^[a-z0-9._-]{1,64}$", username):
         raise ValueError("bad username")
     overrides = role_overrides()
-    role = str(overrides.get(username, payload.get("role", "other"))).lower()
+    role = safe_text(overrides.get(username, payload.get("role", "other")), "role").lower()
+    email = str(payload.get("email", "") or "")[:256]  # stored only, never rendered
+    host = safe_text(payload.get("host", ""), "host") if payload.get("host") else ""
+    client_version = safe_text(payload.get("client_version", ""), "client_version") \
+        if payload.get("client_version") else ""
     collected = parse_ts(payload.get("collected_at", ""))
+    now = utcnow()
+    if collected < now - timedelta(days=30) or collected > now + timedelta(minutes=5):
+        raise ValueError("collected_at outside [now-30d, now+5m] (check client clock)")
     total = int(payload.get("total_tokens", 0) or 0)
     if total < 0 or total > 10**13:
         raise ValueError("implausible total_tokens")
+    agents = _checked_agents(payload.get("agents", []))
+    models = _checked_models(payload.get("models", []))
 
     conn = db()
     try:
@@ -143,10 +166,9 @@ def ingest_snapshot(payload: dict, owner_hint: str = "") -> dict:
             " collected_at,total_tokens,checksum,agents_json,models_json,created_at)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (
-                username, str(payload.get("email", "")), role,
-                str(payload.get("host", "")), str(payload.get("client_version", "")),
+                username, email, role, host, client_version,
                 collected.isoformat(), total, str(payload.get("checksum", "")),
-                json.dumps(payload.get("agents", [])), json.dumps(payload.get("models", [])),
+                json.dumps(agents), json.dumps(models),
                 utcnow().isoformat(),
             ),
         )
@@ -270,6 +292,43 @@ def _loads(s) -> list:
         return v if isinstance(v, list) else []
     except Exception:
         return []
+
+
+def _checked_agents(raw) -> list:
+    """Validate harness rows; every rendered name passes the allowlist."""
+    if not isinstance(raw, list):
+        raise ValueError("bad agents list")
+    clean = []
+    for a in raw[:64]:
+        if not isinstance(a, dict):
+            raise ValueError("bad agent row")
+        total = int(a.get("total_tokens", 0) or 0)
+        if total < 0 or total > 10**13:
+            raise ValueError("implausible agent total")
+        clean.append({"agent_name": safe_text(a.get("agent_name", ""), "agent_name"),
+                      "total_tokens": total})
+    return clean
+
+
+def _checked_models(raw) -> list:
+    """Validate model rows; every rendered name passes the allowlist."""
+    if not isinstance(raw, list):
+        raise ValueError("bad models list")
+    clean = []
+    for m in raw[:256]:
+        if not isinstance(m, dict):
+            raise ValueError("bad model row")
+        total = int(m.get("total_tokens", 0) or 0)
+        if total < 0 or total > 10**13:
+            raise ValueError("implausible model total")
+        clean.append({
+            "agent_name": safe_text(m.get("agent_name", ""), "agent_name"),
+            "model_id": safe_text(m.get("model_id", ""), "model_id"),
+            "total_tokens": total,
+            "session_count": max(0, int(m.get("session_count", 0) or 0)),
+            "turn_count": max(0, int(m.get("turn_count", 0) or 0)),
+        })
+    return clean
 
 
 def owner_of(path: Path) -> str:
