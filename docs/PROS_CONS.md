@@ -43,11 +43,15 @@ and model boards in a dark benchmark-style UI.
    has this property). Mitigations in place: append-only ledger with host/timestamps,
    plausibility caps, anomaly-visible history — but no cryptographic attestation of
    the local stores. Treat the board as motivational, not payroll-grade.
-2. **HTTPS identity is a hint.** Only the SSH path carries OS-level authentication
-   (UID owner). The HTTPS body username is validated for shape, not cryptographically
-   bound to a login. Anyone on the internal network could POST as anyone until
-   per-user tokens / mTLS / LDAP-bind are added (documented follow-up; the API shape
-   already has the `?owner=` hook for a proxy to inject the authenticated user).
+2. **HTTPS identity is a hint — and the proxy gates it.** Only the SSH path carries
+   OS-level authentication (UID owner). The HTTPS body username is validated for
+   shape, not cryptographically bound to a login. In the live deployment the
+   reverse proxy fronts the server with LDAP: anonymous API POSTs are 302'd to the
+   login page, and the CLI detects that (requires JSON `{"ok": true}`, rejects the
+   login HTML) and uses the SSH drop instead. So: SSH-drop is the effective machine
+   transport today; HTTPS engages for authenticated browser/proxy sessions. Per-user
+   API tokens (stored 0600 at onboard) remain the follow-up to make HTTPS a
+   first-class machine transport.
 3. **No in-app LDAP login.** Role truth comes from the admin-curated `users.json`
    snapshot of LDAP groups, not a live bind — group changes need a re-sync step.
    Dashboard itself has no login gate in v1 (internal-network assumption); front with

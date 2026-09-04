@@ -26,9 +26,11 @@ agent-tokens --sync           # force a push now
 agent-tokens --no-sync        # display without pushing
 ```
 
-Every normal run pushes a full all-agent snapshot to the leaderboard server
-(HTTPS POST first, SSH file-drop fallback). The dashboard refreshes within
-seconds. Display filters never affect what is synced.
+Every normal run pushes a full all-agent snapshot to the leaderboard server.
+Transport is automatic: HTTPS POST when the proxy session allows it, otherwise
+SSH file-drop to own3 (`ssh own3 "cat > dropbox/…"`, ingested in ~5s) — the
+live deployment sits behind the LDAP-gated reverse proxy, so the SSH path is
+currently the effective primary. The dashboard refreshes within seconds.
 
 ## 3. Dashboard
 
