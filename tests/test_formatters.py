@@ -2,8 +2,9 @@
 
 import json
 import unittest
-from agent_tokens.formatters import format_number, render_terminal, render_json
-from agent_tokens.models import AgentReport, TokenStats, SessionInfo
+
+from agent_tokens.formatters import format_number, render_json, render_terminal
+from agent_tokens.models import AgentReport, SessionInfo, TokenStats
 
 
 class TestFormatters(unittest.TestCase):
@@ -74,6 +75,29 @@ class TestFormatters(unittest.TestCase):
         rep = AgentReport(agent_name="OpenCode", models=[m], recent_sessions=[s])
         out = render_terminal([rep], use_color=False)
         self.assertIn("3 turns", out)
+
+    def test_render_terminal_hides_zero_token_rows(self):
+        live = TokenStats(model_id="m-live", input_tokens=100)
+        dead = TokenStats(model_id="m-dead")
+        s_live = SessionInfo(session_id="s1", title="Live", model_id="m-live", input_tokens=100)
+        s_dead = SessionInfo(session_id="s2", title="Dead", model_id="m-dead")
+        rep = AgentReport(agent_name="OpenCode", models=[live, dead],
+                          recent_sessions=[s_live, s_dead])
+        out = render_terminal([rep], use_color=False)
+        self.assertIn("m-live", out)
+        self.assertIn("Live", out)
+        self.assertNotIn("m-dead", out)
+        self.assertNotIn("Dead", out)
+        # JSON keeps everything for pipeline fidelity.
+        parsed = json.loads(render_json([rep]))
+        self.assertEqual(len(parsed[0]["models"]), 2)
+        self.assertEqual(len(parsed[0]["recent_sessions"]), 2)
+
+    def test_render_terminal_all_zero_models_shows_no_activity(self):
+        rep = AgentReport(agent_name="OpenCode", models=[TokenStats(model_id="m-dead")])
+        out = render_terminal([rep], use_color=False)
+        self.assertIn("No activity recorded", out)
+        self.assertNotIn("m-dead", out)
 
 
 if __name__ == "__main__":
