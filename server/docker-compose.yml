@@ -1,14 +1,19 @@
 # =============================================================================
 # agent-tokens leaderboard — Docker Compose (own3 / US cluster)
 # =============================================================================
-# Services:
-#   - board: leaderboard server + dashboard UI (:8734)
+# Follows the own3 reverse-proxy convention (cf. viv-dashboard, pKa-estimation):
+#   * NO `ports:` mapping — strictly prohibited. The proxy discovers this
+#     container via labels and serves it at
+#     https://token-leaderboard.own3.aganitha.ai (container_name = subdomain).
+#   * Labels: user / description / port (internal container port) / security.
 # =============================================================================
-# Deploy:
-#   sudo bash scripts/setup_shared_dir.sh
+# Deploy (on own3, from the repo root):
+#   bash scripts/setup_shared_dir.sh
 #   docker compose -f server/docker-compose.yml up -d --build
-# Open: http://own3.aganitha.ai:8734  (or <us-host>:8734)
+# Open: https://token-leaderboard.own3.aganitha.ai
 # =============================================================================
+
+name: token-leaderboard
 
 services:
   board:
@@ -16,6 +21,7 @@ services:
       context: ..
       dockerfile: server/Dockerfile
     container_name: token-leaderboard
+    restart: unless-stopped
     environment:
       - DATA_DIR=/data
       - PORT=8734
@@ -23,17 +29,8 @@ services:
       # Bind-mount the shared record dir so snapshots survive restarts and are
       # visible on the cluster filesystem. Created by setup_shared_dir.sh.
       - /shared/hriteek/token-leaderboard:/data
-    ports:
-      - "8734:8734"
-    networks:
-      - token-board-network
-    restart: unless-stopped
     labels:
-      - "user=${USER}"
-      - "description=agent-tokens org leaderboard"
-      - "port=8734"
-      - "exclude=true"
-
-networks:
-  token-board-network:
-    driver: bridge
+      user: "hriteek"
+      description: "Aganitha agent token-maxing leaderboard"
+      port: "8734"
+      security: "ldap"

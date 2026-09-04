@@ -55,4 +55,4 @@ ls -l "$BASE/ledger.jsonl" "$BASE/users.json"
 echo
 echo "Permissions OK. Users push with:"
 echo "  agent-tokens --sync   (https primary, ssh-drop fallback)"
-echo "Dashboard reads only via http://own3.aganitha.ai:8734 (never the files)."
+echo "Dashboard reads only via https://token-leaderboard.own3.aganitha.ai (never the files)."

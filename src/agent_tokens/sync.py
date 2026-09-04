@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 DEFAULT_SERVER_URL = os.environ.get(
-    "AGENT_TOKENS_SERVER", "http://own3.aganitha.ai:8734"
+    "AGENT_TOKENS_SERVER", "https://token-leaderboard.own3.aganitha.ai"
 )
 DEFAULT_SSH_HOST = os.environ.get("AGENT_TOKENS_SSH_HOST", "own3")
 DEFAULT_REMOTE_DIR = os.environ.get(

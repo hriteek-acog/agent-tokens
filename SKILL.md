@@ -32,7 +32,7 @@ seconds. Display filters never affect what is synced.
 
 ## 3. Dashboard
 
-- URL: `http://own3.aganitha.ai:8734` (Daily / Weekly tabs)
+- URL: `https://token-leaderboard.own3.aganitha.ai` (Daily / Weekly tabs)
 - Views: overall leaderboard, role-wise board, top harnesses, top models
 - Scores are window deltas (latest cumulative minus pre-window baseline)
 
@@ -41,9 +41,9 @@ seconds. Display filters never affect what is synced.
 ```bash
 agent-tokens --me                                    # identity present?
 agent-tokens --sync                                  # watch [leaderboard] line on stderr
-AGENT_TOKENS_SERVER=http://own3.aganitha.ai:8734 agent-tokens --sync
-curl http://own3.aganitha.ai:8734/api/v1/health
-curl "http://own3.aganitha.ai:8734/api/v1/leaderboard?window=daily"
+AGENT_TOKENS_SERVER=https://token-leaderboard.own3.aganitha.ai agent-tokens --sync
+curl https://token-leaderboard.own3.aganitha.ai/api/v1/health
+curl "https://token-leaderboard.own3.aganitha.ai/api/v1/leaderboard?window=daily"
 ```
 
 Sync never breaks local display: failures print `[leaderboard] sync skipped (...)`

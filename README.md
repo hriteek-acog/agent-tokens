@@ -93,13 +93,14 @@ snapshot to the org server in the background — HTTPS POST first, SSH
 file-drop to own3 as fallback. Force it with `agent-tokens --sync`, skip it
 with `agent-tokens --no-sync`. Sync never breaks local display.
 
-Dashboard: `http://own3.aganitha.ai:8734` — Daily/Weekly overall, role-wise,
+Dashboard: `https://token-leaderboard.own3.aganitha.ai` — Daily/Weekly overall, role-wise,
 harness, and model boards (see `SKILL.md`, `docs/design.md`, `docs/PROS_CONS.md`).
 
-Deploy (on own3, as root/sudoer):
+Deploy (on own3, from the repo root — no sudo needed, no ports published;
+the reverse proxy picks the container up by its labels):
 
 ```bash
-sudo bash scripts/setup_shared_dir.sh
+bash scripts/setup_shared_dir.sh
 docker compose -f server/docker-compose.yml up -d --build
 ```
 
