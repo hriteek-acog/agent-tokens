@@ -5,42 +5,52 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aganitha · Agent Token Leaderboard</title>
 <style>
+/* Enterprise palette: flat whites and slate grays with a single Google-blue
+   accent. No gradients. Matches the reference benchmark chart/table styling:
+   white surfaces, #e5e7eb hairlines, #6b7280 secondary text, #1a73e8 accent,
+   slate-gray bars with the leader highlighted in blue. */
 :root{
-  --bg:#0b0e14; --panel:#131826; --panel2:#1a2133; --line:#263049;
-  --ink:#e8ecf4; --muted:#93a0b8; --gold:#e8b64c; --silver:#b9c2d4; --bronze:#d08a4e;
-  --accent:#6ea8fe; --green:#3fd68c; --radius:14px;
-  --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --page:#f1f3f4; --card:#ffffff; --line:#e5e7eb;
+  --ink:#111827; --muted:#6b7280;
+  --blue:#1a73e8; --blue-dark:#1558b5; --blue-fill:#e8f0fe;
+  --gray-bar:#9ca3af; --gray-best:#eef0f3;
+  --radius:8px;
+  --font:Roboto,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 *{box-sizing:border-box}
-body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#1b2540 0%,var(--bg) 60%);color:var(--ink);font-family:var(--font)}
+body{margin:0;background:var(--page);color:var(--ink);font-family:var(--font)}
 .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 60px}
-header{display:flex;align-items:center;gap:16px;padding:18px 22px;background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:var(--radius)}
-.logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#274060,#6ea8fe);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;color:#fff}
-h1{font-size:20px;margin:0;letter-spacing:.2px}
+header{display:flex;align-items:center;gap:16px;padding:18px 22px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}
+.logo{width:44px;height:44px;border-radius:6px;background:var(--blue);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px;color:#fff}
+h1{font-size:20px;margin:0;font-weight:500}
 .sub{color:var(--muted);font-size:13px;margin-top:2px}
 .tabs{margin-left:auto;display:flex;gap:8px}
-.tab{border:1px solid var(--line);background:transparent;color:var(--ink);padding:8px 16px;border-radius:999px;cursor:pointer;font-size:13px}
-.tab.active{background:var(--gold);border-color:var(--gold);color:#111;font-weight:700}
+.tab{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px}
+.tab.active{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:500}
 .grid{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:16px}
 @media(max-width:900px){.grid{grid-template-columns:1fr}}
-.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:var(--radius);padding:18px}
-.card h2{font-size:13px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+.card h2{font-size:13px;font-weight:500;color:var(--ink);margin:0 0 12px}
+.card h2 .hint{color:var(--muted);font-weight:400}
 table{width:100%;border-collapse:collapse;font-size:14px}
-th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.6px;padding:8px;border-bottom:1px solid var(--line)}
-td{padding:9px 8px;border-bottom:1px solid rgba(38,48,73,.6)}
-tr.top1 td:first-child{color:var(--gold);font-weight:800}
-tr.top2 td:first-child{color:var(--silver);font-weight:800}
-tr.top3 td:first-child{color:var(--bronze);font-weight:800}
-.num{font-family:var(--mono);text-align:right}
-.pill{display:inline-block;padding:2px 10px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--muted)}
-.role-sec{margin-top:14px}
+th{text-align:left;color:var(--muted);font-weight:500;font-size:12px;padding:8px;border-bottom:1px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid var(--line)}
+tbody tr:last-child td{border-bottom:none}
+tr.leader td{background:var(--blue-fill)}
+tr.leader td:first-child{border-left:3px solid var(--blue)}
+td.rank{color:var(--muted);width:36px}
+tr.leader td.rank{color:var(--blue);font-weight:700}
+.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+td.best{background:var(--gray-best);font-weight:700}
+.pill{display:inline-block;padding:2px 10px;border-radius:4px;background:var(--gray-best);font-size:12px;color:var(--muted)}
+.role-sec{margin-top:16px}
 .meta{display:flex;gap:12px;color:var(--muted);font-size:12px;margin-top:12px}
-.bar{height:6px;border-radius:3px;background:#0e1422;overflow:hidden;margin-top:6px}
-.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--green))}
+.bar{height:8px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:6px}
+.bar>i{display:block;height:100%;background:var(--gray-bar)}
+tr.leader .bar>i{background:var(--blue)}
 footer{color:var(--muted);font-size:12px;margin-top:18px;text-align:center}
-.refresh{margin-left:auto}
-select{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+select{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:13px}
 </style>
 </head>
 <body>
@@ -59,7 +69,7 @@ select{background:var(--panel);color:var(--ink);border:1px solid var(--line);bor
 
   <div class="grid">
     <div class="card">
-      <h2>Overall leaderboard <span class="pill" id="scope">today</span></h2>
+      <h2>Overall leaderboard <span class="hint" id="scope">today</span></h2>
       <table><thead><tr><th>#</th><th>User</th><th>Role</th><th class="num">Tokens</th></tr></thead>
       <tbody id="overall"></tbody></table>
       <div class="meta"><span id="count"></span><span id="gen"></span></div>
@@ -94,12 +104,14 @@ async function load(){
   document.getElementById("count").textContent = data.users.length + " contributors";
   const max = Math.max(1, ...data.users.map(u=>u.tokens));
   document.getElementById("overall").innerHTML = data.users.map((u,i)=>
-    `<tr class="${i===0?'top1':i===1?'top2':i===2?'top3':''}"><td>${i+1}</td><td><b>${u.username}</b><div class="bar"><i style="width:${(100*u.tokens/max).toFixed(1)}%"></i></div></td><td><span class="pill">${u.role}</span></td><td class="num">${fmt(u.tokens)}</td></tr>`
+    `<tr class="${i===0?'leader':''}"><td class="rank">${i+1}</td><td><b>${u.username}</b><div class="bar"><i style="width:${(100*u.tokens/max).toFixed(1)}%"></i></div></td><td><span class="pill">${u.role}</span></td><td class="num">${fmt(u.tokens)}</td></tr>`
   ).join("") || `<tr><td colspan=4>No pushes yet — run <code>agent-tokens --sync</code>.</td></tr>`;
+  const topH = data.harnesses.length ? data.harnesses[0].tokens : 0;
   document.getElementById("harness").innerHTML = data.harnesses.slice(0,8).map(h=>
-    `<tr><td>${h.harness}</td><td class="num">${fmt(h.tokens)}</td></tr>`).join("") || "<tr><td>—</td></tr>";
+    `<tr><td>${h.harness}</td><td class="num${h.tokens===topH?' best':''}">${fmt(h.tokens)}</td></tr>`).join("") || "<tr><td>—</td></tr>";
+  const topM = data.models.length ? data.models[0].tokens : 0;
   document.getElementById("models").innerHTML = data.models.slice(0,8).map(m=>
-    `<tr><td>${m.model}</td><td class="num">${fmt(m.tokens)}</td></tr>`).join("") || "<tr><td>—</td></tr>";
+    `<tr><td>${m.model}</td><td class="num${m.tokens===topM?' best':''}">${fmt(m.tokens)}</td></tr>`).join("") || "<tr><td>—</td></tr>";
   const sel = document.getElementById("roleSel");
   const roles = Object.keys(data.by_role).sort();
   if(!sel.options.length || sel.dataset.w !== window_){
@@ -112,7 +124,7 @@ function renderRole(){
   const r = document.getElementById("roleSel").value;
   const rows = (data && data.by_role[r]) || [];
   document.getElementById("roleBody").innerHTML = rows.map((u,i)=>
-    `<tr><td>${i+1}</td><td><b>${u.username}</b></td><td class="num">${fmt(u.tokens)}</td><td class="num">${fmt(u.cumulative)}</td></tr>`
+    `<tr class="${i===0?'leader':''}"><td class="rank">${i+1}</td><td><b>${u.username}</b></td><td class="num">${fmt(u.tokens)}</td><td class="num">${fmt(u.cumulative)}</td></tr>`
   ).join("") || "<tr><td colspan=4>No data for this role.</td></tr>";
 }
 document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));b.classList.add("active");window_=b.dataset.w;load();});
