@@ -2,13 +2,16 @@
 # One-line setup for agent-tokens (org leaderboard edition).
 #
 #   bash scripts/install.sh            # from the repo, or:
-#   bash <(curl -s https://raw.githubusercontent.com/hriteek-acog/agent-tokens/org-leaderboard/scripts/install.sh)
+#   bash <(curl -s https://raw.githubusercontent.com/hriteek-acog/agent-tokens/main/scripts/install.sh)
 #
-# What it fixes (seen in the wild): pyenv shims resolve `agent-tokens` per
-# Python version, so installing under 3.11 leaves the command missing on the
-# 3.13 default. This script installs into the CURRENTLY ACTIVE python AND the
-# pyenv global default, rehashes shims, and verifies the command resolves —
-# so no user has to debug pyenv themselves.
+# What it fixes (seen in the wild):
+#   * pyenv shims resolve `agent-tokens` per Python version, so installing
+#     under 3.11 leaves the command missing on the 3.13 default. Installs into
+#     the CURRENTLY ACTIVE python AND the pyenv global default, then rehashes.
+#   * Homebrew/system Pythons refuse `pip install` (PEP 668,
+#     externally-managed-environment). Retries once with
+#     --break-system-packages — safe here: agent-tokens has zero runtime
+#     dependencies (stdlib only), so nothing can conflict.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,7 +43,17 @@ done
 
 for py in $UNIQ_LIST; do
   echo "==> installing into $py"
-  "$py" -m pip install -e "$REPO_ROOT" 2>&1 | tail -n 1
+  if out="$("$py" -m pip install -e "$REPO_ROOT" 2>&1)"; then
+    echo "$out" | tail -n 1
+  elif echo "$out" | grep -qi "externally-managed"; then
+    echo "    PEP 668 system python detected; retrying with --break-system-packages"
+    echo "    (safe: agent-tokens has no runtime dependencies)"
+    "$py" -m pip install -e "$REPO_ROOT" --break-system-packages 2>&1 | tail -n 3
+  else
+    echo "$out" | tail -n 5
+    echo "!! install failed for $py (see above)"
+    exit 1
+  fi
 done
 
 if command -v pyenv >/dev/null 2>&1; then
