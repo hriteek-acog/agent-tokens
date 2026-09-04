@@ -22,7 +22,7 @@
 body{margin:0;background:var(--page);color:var(--ink);font-family:var(--font)}
 .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 60px}
 header{display:flex;align-items:center;gap:16px;padding:18px 22px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}
-.logo{width:44px;height:44px;border-radius:6px;background:var(--blue);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px;color:#fff}
+.logo-img{height:36px;width:auto;display:block}
 h1{font-size:20px;margin:0;font-weight:500}
 .sub{color:var(--muted);font-size:13px;margin-top:2px}
 .tabs{margin-left:auto;display:flex;gap:8px}
@@ -56,7 +56,7 @@ select{background:var(--card);color:var(--ink);border:1px solid var(--line);bord
 <body>
 <div class="wrap">
   <header>
-    <div class="logo">A</div>
+    <div><img class="logo-img" src="/logo.png" alt="Aganitha"></div>
     <div>
       <h1>Aganitha · Token Maxing Leaderboard</h1>
       <div class="sub" id="meta">org-wide agent token usage · updates live on every <code>agent-tokens</code> run</div>

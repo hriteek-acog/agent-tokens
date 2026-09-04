@@ -333,6 +333,17 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path in ("/", "/index.html"):
             page = (HERE / "dashboard.html").read_text()
             self._send(200, page.encode(), "text/html; charset=utf-8")
+        elif parsed.path == "/logo.png":
+            try:
+                blob = (HERE / "logo.png").read_bytes()
+            except OSError:
+                return self._send(404, b'{"error": "not found"}')
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(blob)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(blob)
         else:
             self._send(404, b'{"error": "not found"}')
 
