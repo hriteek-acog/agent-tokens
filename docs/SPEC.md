@@ -212,7 +212,7 @@ Env: `DATA_DIR` (default `/data`), `PORT` (default `8734`). Files:
 
 | Method | Path | Behavior |
 |---|---|---|
-| POST | `/api/v1/ingest?owner=` | Parse ≤2MB JSON → `ingest_snapshot(payload, owner_hint)`. 202 + `{"ok": true, "id"}` (or `"deduped": true`); 400 on bad schema/checksum/values; 413 over limit; 404 otherwise |
+| POST | `/api/v1/ingest?owner=` | Parse ≤2MB JSON → `ingest_snapshot(payload, owner_hint)`. 202 + `{"ok": true, "id"}` (or `"deduped": true`); 403 when `INGEST_TOKEN` is set and the request lacks it (`?token=` or `X-Ingest-Token`); 400 on bad schema/checksum/values; 413 over limit; 404 otherwise |
 | GET | `/api/v1/leaderboard?window=daily\|weekly` | §7.3 JSON (unknown window → daily) |
 | GET | `/api/v1/health` | `{"ok": true}` |
 | GET | `/`, `/index.html` | `dashboard.html` (`text/html`) |
@@ -231,7 +231,8 @@ CORS `*`; OPTIONS handled.
 6. Checksum dedupe: existing checksum → return `{ok, id, deduped: True}`.
 7. Append row + mirror full record to `ledger.jsonl` (audit trail).
 
-SQLite DDL:
+SQLite DDL (lives in `DB_DIR`, default = `DATA_DIR`; production mounts a
+container-local volume because SQLite locking is unreliable on NFS — see §10):
 
 ```sql
 CREATE TABLE snapshots (
@@ -264,7 +265,9 @@ score; multi-machine users sum correctly):
   keyed `agent/model`, top 25 returned).
 - Response: `{window, window_start, generated_at, users[] (rank, username, role,
   email, tokens, cumulative, pushes, last_push), by_role{}, roles[], harnesses[],
-  models[]}` with users sorted desc, ranks assigned.
+  models[]}` with users sorted desc, ranks assigned. Results are cached
+  (`LEADERBOARD_TTL_S`, default 5s; key includes the DB path) and the cache is
+  invalidated on every ingest.
 
 ### 7.4 Dropbox poller
 
@@ -295,7 +298,10 @@ non-root server user would be blind to submissions. The trust boundary is the
 LDAP-gated proxy + labels, not the container uid.
 
 Anti-cheat summary: attribution = filesystem UID (SSH) or admin map, never the
-JSON body; raw drops are consumed once then deleted; history is append-only;
+JSON body; machine HTTPS ingest additionally requires `INGEST_TOKEN`
+(`server/.env`, gitignored, set once per host — direct container-IP POSTs that
+bypass the LDAP proxy get 403); raw drops are consumed once then deleted;
+history is append-only;
 self-inflation of one's *own* counters is detectable (ledger holds checksums,
 hosts, timestamps) but not preventable — treat the board as motivational, not
 payroll-grade. See `PROS_CONS.md`.
@@ -334,8 +340,10 @@ services:
     build: {context: <repo root>, dockerfile: server/Dockerfile}
     container_name: token-leaderboard   # = public subdomain
     restart: unless-stopped
-    environment: [DATA_DIR=/data, PORT=8734]
-    volumes: [/shared/hriteek/token-leaderboard:/data]
+    environment: [DATA_DIR=/data, DB_DIR=/dbdata, PORT=8734,
+                  INGEST_TOKEN=${INGEST_TOKEN:-}, LEADERBOARD_TTL_S=5]
+    volumes: [/shared/hriteek/token-leaderboard:/data,
+              token-board-db:/dbdata]   # named local volume for the DB
     labels: {user: "hriteek",
              description: "Aganitha agent token-maxing leaderboard",
              port: "8734", security: "ldap"}
@@ -344,8 +352,9 @@ services:
 `Dockerfile`: `python:3.11-slim`, copy `app.py` + `dashboard.html` + `logo.png`,
 `EXPOSE 8734`, `CMD ["python3", "app.py"]` (runs as root per §8).
 
-Deploy (own3, repo root): `bash scripts/setup_shared_dir.sh`, then
-`docker compose -f server/docker-compose.yml up -d --build`. Verify:
+Deploy (own3, repo root): `bash scripts/setup_shared_dir.sh`, create
+`server/.env` with `INGEST_TOKEN=<random 32 bytes>` (`chmod 600`, never
+committed), then `docker compose -f server/docker-compose.yml up -d --build`. Verify:
 `docker exec token-leaderboard` → `GET 127.0.0.1:8734/api/v1/health` is
 `{"ok": true}`; public URL 302-redirects to LDAP login when anonymous (correct).
 

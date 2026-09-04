@@ -43,15 +43,12 @@ and model boards in a dark benchmark-style UI.
    has this property). Mitigations in place: append-only ledger with host/timestamps,
    plausibility caps, anomaly-visible history — but no cryptographic attestation of
    the local stores. Treat the board as motivational, not payroll-grade.
-2. **HTTPS identity is a hint — and the proxy gates it.** Only the SSH path carries
-   OS-level authentication (UID owner). The HTTPS body username is validated for
-   shape, not cryptographically bound to a login. In the live deployment the
-   reverse proxy fronts the server with LDAP: anonymous API POSTs are 302'd to the
-   login page, and the CLI detects that (requires JSON `{"ok": true}`, rejects the
-   login HTML) and uses the SSH drop instead. So: SSH-drop is the effective machine
-   transport today; HTTPS engages for authenticated browser/proxy sessions. Per-user
-   API tokens (stored 0600 at onboard) remain the follow-up to make HTTPS a
-   first-class machine transport.
+2. **HTTPS identity is gated, machines use SSH.** The reverse proxy fronts the
+   server with LDAP (anonymous API POSTs 302 to login; the CLI detects that and
+   falls back to the SSH drop). Additionally, `POST /api/v1/ingest` requires
+   `INGEST_TOKEN` when set (production `server/.env`), so direct container-IP
+   POSTs from the cluster that bypass the proxy get 403. Per-user API tokens
+   remain the follow-up to make HTTPS a first-class machine transport.
 3. **No in-app LDAP login.** Role truth comes from the admin-curated `users.json`
    snapshot of LDAP groups, not a live bind — group changes need a re-sync step.
    Dashboard itself has no login gate in v1 (internal-network assumption); front with
@@ -61,9 +58,12 @@ and model boards in a dark benchmark-style UI.
    clock skew on clients can misplace `collected_at` (server orders by arrival too,
    but window math uses client timestamps). Push cadence = run cadence, so infrequent
    runners have coarser deltas.
-5. **Single-node SQLite.** Fine for org scale (hundreds of users, tiny rows), but no
-   multi-writer HA. If the board outgrows one container, migrate the `snapshots`
-   table to Postgres — the ingest/aggregate boundary is already isolated in `app.py`.
+5. **SQLite lives off NFS by design.** The DB is a working copy on a
+   container-local volume (rebuilt from the append-only ledger on startup);
+   only the ledger, dropbox, and `users.json` sit on shared fs. Leaderboard
+   results additionally carry a 5s cache (invalidated on ingest) so per-viewer
+   10s polling doesn't full-scan the table. Postgres migration only if actually
+   observed to be needed.
 6. **Shared-fs trust boundary.** Security rests on `setup_shared_dir.sh` being run as
    root and the container's `/data` mount staying server-owned. A mis-chmod or a
    host admin error re-opens hand-editing. Re-run the script after any manual
