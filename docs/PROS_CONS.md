@@ -28,8 +28,9 @@ flat light benchmark-style UI with the Aganitha logo.
 2. **Roles aren't live-synced.** `users.json` is a manual snapshot of LDAP
    groups; regroupings need an admin edit.
 3. **UTC day boundaries** (05:30 IST cut) and run-cadence granularity:
-   onboarding day counts the full total; silent users vanish from the window;
-   infrequent runners get coarser deltas.
+   onboarding day scores the client-measured today portion (lifetime history
+   excluded); silent users vanish from the window; infrequent runners get
+   coarser deltas.
 4. **Shared-fs trust boundary.** Security rests on the dropbox staying 1733,
    the token staying secret, and the proxy labels staying put. Re-run
    `setup_shared_dir.sh` after any manual intervention on the path.

@@ -204,32 +204,87 @@ class TestServer(unittest.TestCase):
                 AgentReport(agent_name="Claude Code", models=[TokenStats(model_id="opus", input_tokens=claude, session_count=1)]),
             ]
 
+    def _patched_app(self, appmod, data):
+        return (mock.patch.object(appmod, "DATA_DIR", data),
+                mock.patch.object(appmod, "DB_PATH", data / "leaderboard.db"),
+                mock.patch.object(appmod, "LEDGER_PATH", data / "ledger.jsonl"),
+                mock.patch.object(appmod, "USERS_JSON", data / "users.json"))
+
+    def test_windows_delta_harness_and_models(self):
+        """Daily deltas follow the window. The 2-day-old baseline is pre-today
+        on every weekday, so this is deterministic by construction."""
+        import datetime as _dt
+
+        import server.app as appmod
+
+        def _reps(codex, claude):
+            return [
+                AgentReport(agent_name="Codex", models=[TokenStats(model_id="gpt-5", input_tokens=codex, session_count=1)]),
+                AgentReport(agent_name="Claude Code", models=[TokenStats(model_id="opus", input_tokens=claude, session_count=1)]),
+            ]
+
         with tempfile.TemporaryDirectory() as td:
             data = Path(td)
-            with mock.patch.object(appmod, "DATA_DIR", data), \
-                 mock.patch.object(appmod, "DB_PATH", data / "leaderboard.db"), \
-                 mock.patch.object(appmod, "LEDGER_PATH", data / "ledger.jsonl"), \
-                 mock.patch.object(appmod, "USERS_JSON", data / "users.json"):
+            patches = self._patched_app(appmod, data)
+            for p in patches:
+                p.start()
+            try:
                 now = _dt.datetime.now(_dt.timezone.utc)
-                old = syncmod.build_snapshot("u", "u@aganitha.ai", "engineering", _reps(1000, 1000))
+                old = syncmod.build_snapshot("a", "a@aganitha.ai", "engineering", _reps(1000, 1000))
                 old["collected_at"] = (now - _dt.timedelta(days=2)).isoformat()
                 old["checksum"] = syncmod.checksum_of(old)
-                new = syncmod.build_snapshot("u", "u@aganitha.ai", "engineering", _reps(3000, 1500))
+                new = syncmod.build_snapshot("a", "a@aganitha.ai", "engineering", _reps(3000, 1500))
                 new["collected_at"] = (now - _dt.timedelta(hours=1)).isoformat()
                 new["checksum"] = syncmod.checksum_of(new)
                 appmod.ingest_snapshot(old)
                 appmod.ingest_snapshot(new)
                 daily = appmod.leaderboard("daily")
-                weekly = appmod.leaderboard("weekly")
-                # Daily = today's delta only; weekly = full growth.
                 self.assertEqual(daily["users"][0]["tokens"], 2500)
-                self.assertEqual(weekly["users"][0]["tokens"], 4500)
-                dh = {h["harness"]: h["tokens"] for h in daily["harnesses"]}
-                wh = {h["harness"]: h["tokens"] for h in weekly["harnesses"]}
-                self.assertEqual(dh, {"Codex": 2000, "Claude Code": 500})
-                self.assertEqual(wh, {"Codex": 3000, "Claude Code": 1500})
-                dm = {m["model"]: m["tokens"] for m in daily["models"]}
-                self.assertEqual(dm, {"Codex/gpt-5": 2000, "Claude Code/opus": 500})
+                self.assertEqual(
+                    {h["harness"]: h["tokens"] for h in daily["harnesses"]},
+                    {"Codex": 2000, "Claude Code": 500})
+                self.assertEqual(
+                    {m["model"]: m["tokens"] for m in daily["models"]},
+                    {"Codex/gpt-5": 2000, "Claude Code/opus": 500})
+            finally:
+                for p in patches:
+                    p.stop()
+
+    def test_weekly_fallback_without_baseline(self):
+        """Both snapshots strictly inside the current week on ANY weekday, so
+        no weekly baseline exists and the legacy fallback (full total) applies."""
+        import datetime as _dt
+
+        import server.app as appmod
+
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            patches = self._patched_app(appmod, data)
+            for p in patches:
+                p.start()
+            try:
+                now = _dt.datetime.now(_dt.timezone.utc)
+                monday = (now - _dt.timedelta(days=now.weekday())).replace(
+                    hour=0, minute=0, second=0, microsecond=0)
+                span = max((now - monday).total_seconds(), 120)
+                old = syncmod.build_snapshot("b", "b@aganitha.ai", "other",
+                                             [AgentReport(agent_name="Codex", models=[TokenStats(model_id="gpt-5", input_tokens=2000, session_count=1)])])
+                old["collected_at"] = (monday + _dt.timedelta(seconds=span / 2)).isoformat()
+                old["checksum"] = syncmod.checksum_of(old)
+                new = syncmod.build_snapshot("b", "b@aganitha.ai", "other",
+                                             [AgentReport(agent_name="Codex", models=[TokenStats(model_id="gpt-5", input_tokens=5000, session_count=1)])])
+                new["collected_at"] = (now - _dt.timedelta(seconds=1)).isoformat()
+                new["checksum"] = syncmod.checksum_of(new)
+                appmod.ingest_snapshot(old)
+                appmod.ingest_snapshot(new)
+                weekly = appmod.leaderboard("weekly")
+                self.assertEqual(weekly["users"][0]["tokens"], 5000)
+                self.assertEqual(
+                    {h["harness"]: h["tokens"] for h in weekly["harnesses"]},
+                    {"Codex": 5000})
+            finally:
+                for p in patches:
+                    p.stop()
 
     def test_multi_host_series_sum(self):
         """Two machines, same user: scores sum per host series, so a fresh
@@ -278,6 +333,49 @@ class TestServer(unittest.TestCase):
                 self.assertEqual(alltime["users"][0]["tokens"], 2500)
                 self.assertEqual(alltime["users"][0]["cumulative"], 2500)
                 self.assertEqual(appmod.leaderboard("bogus")["window"], "daily")
+
+    def test_baseline_less_day_uses_today_portion(self):
+        """Onboarding day (no pre-window baseline): lifetime history must not
+        count as today's usage — the client-measured today portion does."""
+        import server.app as appmod
+
+        def _reps(codex_total):
+            return [AgentReport(
+                agent_name="Codex",
+                models=[TokenStats(model_id="gpt-5", input_tokens=codex_total,
+                                   session_count=1)])]
+
+        def _today(codex_today):
+            return [AgentReport(
+                agent_name="Codex",
+                models=[TokenStats(model_id="gpt-5", input_tokens=codex_today,
+                                   session_count=1)])]
+
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            with mock.patch.object(appmod, "DATA_DIR", data), \
+                 mock.patch.object(appmod, "DB_PATH", data / "leaderboard.db"), \
+                 mock.patch.object(appmod, "LEDGER_PATH", data / "ledger.jsonl"), \
+                 mock.patch.object(appmod, "USERS_JSON", data / "users.json"):
+                snap = syncmod.build_snapshot("u", "u@aganitha.ai", "other",
+                                              _reps(100000), today_reports=_today(300))
+                self.assertEqual(snap["today_total"], 300)
+                self.assertIn("today_tokens", snap["models"][0])
+                appmod.ingest_snapshot(snap)
+                daily = appmod.leaderboard("daily")
+                self.assertEqual(daily["users"][0]["tokens"], 300)
+                self.assertEqual(daily["users"][0]["cumulative"], 100000)
+                dh = {h["harness"]: h["tokens"] for h in daily["harnesses"]}
+                self.assertEqual(dh, {"Codex": 300})
+                # Without a today scan the legacy shape carries no today keys
+                # and old snapshots keep the old fallback.
+                legacy = syncmod.build_snapshot("v", "v@aganitha.ai", "other",
+                                                _reps(50000))
+                self.assertNotIn("today_tokens", legacy["models"][0])
+                appmod.ingest_snapshot(legacy)
+                self.assertEqual(
+                    [u for u in appmod.leaderboard("daily")["users"]
+                     if u["username"] == "v"][0]["tokens"], 50000)
 
     def test_doctor_checks(self):
         from agent_tokens import doctor as doctormod

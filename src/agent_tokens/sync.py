@@ -49,37 +49,68 @@ def checksum_of(payload: Dict[str, Any]) -> str:
     return hashlib.sha256(_canonical(body).encode("utf-8")).hexdigest()
 
 
+def _model_key(agent_name: str, model_id: str) -> tuple:
+    return (agent_name or "unknown", model_id or "unknown")
+
+
 def build_snapshot(
     username: str,
     email: str,
     role: str,
     reports: List[Any],
     client_version: str = "",
+    today_reports: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
-    """Collapse per-agent reports into one snapshot dict (JSON-serialisable)."""
+    """Collapse per-agent reports into one snapshot dict (JSON-serialisable).
+
+    `today_reports` (same shape, collected with today_only=True) adds
+    `today_tokens` per agent/model plus a top-level `today_total`. The server
+    needs them: without a pre-window baseline (e.g. onboarding day) all-time
+    deltas would count lifetime history as today's usage.
+    """
+    today_totals: Dict[tuple, int] = {}
+    with_today = today_reports is not None
+    for rep in today_reports or []:
+        if rep is None:
+            continue
+        for m in getattr(rep, "models", []) or []:
+            key = _model_key(getattr(rep, "agent_name", "unknown"), m.model_id)
+            today_totals[key] = today_totals.get(key, 0) + m.total_tokens
     agents: List[Dict[str, Any]] = []
     models: List[Dict[str, Any]] = []
     total = 0
+    today_total = 0
     for rep in reports or []:
         if rep is None:
             continue
         agent_total = 0
+        agent_today = 0
         for m in getattr(rep, "models", []) or []:
             mt = m.total_tokens  # single formula lives on TokenStats
             agent_total += mt
-            models.append(
-                {
-                    "agent_name": getattr(rep, "agent_name", "unknown"),
-                    "model_id": m.model_id,
-                    "total_tokens": mt,
-                    "session_count": m.session_count or 0,
-                    "turn_count": m.turn_count or 0,
-                }
-            )
+            row: Dict[str, Any] = {
+                "agent_name": getattr(rep, "agent_name", "unknown"),
+                "model_id": m.model_id,
+                "total_tokens": mt,
+                "session_count": m.session_count or 0,
+                "turn_count": m.turn_count or 0,
+            }
+            if with_today:
+                # Key presence tells the server a today scan ran; a bare 0
+                # from a real scan is meaningful, an absent key is legacy.
+                t = today_totals.get(_model_key(getattr(rep, "agent_name", "unknown"), m.model_id), 0)
+                row["today_tokens"] = t
+                agent_today += t
+            models.append(row)
         total += agent_total
-        agents.append(
-            {"agent_name": getattr(rep, "agent_name", "unknown"), "total_tokens": agent_total}
-        )
+        today_total += agent_today
+        agent_row: Dict[str, Any] = {
+            "agent_name": getattr(rep, "agent_name", "unknown"),
+            "total_tokens": agent_total,
+        }
+        if with_today:
+            agent_row["today_tokens"] = agent_today
+        agents.append(agent_row)
     payload: Dict[str, Any] = {
         "schema": "agent-tokens.snapshot/v1",
         "username": username,
@@ -89,6 +120,7 @@ def build_snapshot(
         "client_version": client_version,
         "collected_at": utc_now_iso(),
         "total_tokens": total,
+        "today_total": today_total,
         "agents": agents,
         "models": models,
     }
