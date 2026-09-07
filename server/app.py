@@ -265,6 +265,12 @@ def _compute_leaderboard(window: str, now: datetime) -> dict:
     series_by_user: dict = {}
     for (username, host), snaps in per_series.items():
         series_by_user.setdefault(username, []).append((host, snaps))
+
+    def _add_model(key, tokens, sessions):
+        entry = model_tot.setdefault(key, {"tokens": 0, "sessions": 0})
+        entry["tokens"] += tokens
+        entry["sessions"] += sessions
+
     for username, series in series_by_user.items():
         user_score, user_cum, pushes = 0, 0, 0
         last_push, email, role = "", "", "other"
@@ -284,23 +290,59 @@ def _compute_leaderboard(window: str, now: datetime) -> dict:
             if not in_window:
                 continue
             latest = in_window[-1]
-            base_total = base["total_tokens"] if base else 0
-            user_score += max(0, latest["total_tokens"] - base_total)
+            latest_agents = _loads(latest["agents_json"])
+            latest_models = _loads(latest["models_json"])
+            has_today = any(isinstance(a, dict) and "today_tokens" in a
+                            for a in latest_agents)
+            if base is not None:
+                # Normal case: delta of cumulative counters against baseline.
+                base_total = base["total_tokens"]
+                user_score += max(0, latest["total_tokens"] - base_total)
+                for m in latest_models:
+                    key = f"{m.get('agent_name')}/{m.get('model_id')}"
+                    prev = base_models.get((m.get("agent_name"), m.get("model_id")), 0)
+                    _add_model(key, max(0, m.get("total_tokens", 0) - prev),
+                               m.get("session_count", 0) or 0)
+                for a in latest_agents:
+                    prev = base_agents.get(a.get("agent_name"), 0)
+                    harness_tot[a.get("agent_name")] = harness_tot.get(a.get("agent_name"), 0) + max(
+                        0, a.get("total_tokens", 0) - prev)
+            elif has_today and window == "daily":
+                # No baseline (e.g. onboarding day): use the client-measured
+                # today portion — lifetime history must not count as "today".
+                # All in-window snapshots are from today by construction.
+                user_score += sum(a.get("today_tokens", 0) for a in latest_agents)
+                for m in latest_models:
+                    _add_model(f"{m.get('agent_name')}/{m.get('model_id')}",
+                               m.get("today_tokens", 0), m.get("session_count", 0) or 0)
+                for a in latest_agents:
+                    harness_tot[a.get("agent_name")] = harness_tot.get(a.get("agent_name"), 0) + a.get("today_tokens", 0)
+            elif has_today:
+                # Weekly/all-time without baseline: sum each in-window day's
+                # last today-portion (today counters reset daily client-side).
+                by_day: dict = {}
+                for s in in_window:
+                    by_day[parse_ts(s["collected_at"]).date().isoformat()] = s
+                for s in by_day.values():
+                    day_agents = _loads(s["agents_json"])
+                    user_score += sum(a.get("today_tokens", 0) for a in day_agents)
+                    for m in _loads(s["models_json"]):
+                        _add_model(f"{m.get('agent_name')}/{m.get('model_id')}",
+                                   m.get("today_tokens", 0), m.get("session_count", 0) or 0)
+                    for a in day_agents:
+                        harness_tot[a.get("agent_name")] = harness_tot.get(a.get("agent_name"), 0) + a.get("today_tokens", 0)
+            else:
+                # Legacy snapshots without today data: old fallback (full total).
+                user_score += latest["total_tokens"]
+                for m in latest_models:
+                    _add_model(f"{m.get('agent_name')}/{m.get('model_id')}",
+                               m.get("total_tokens", 0), m.get("session_count", 0) or 0)
+                for a in latest_agents:
+                    harness_tot[a.get("agent_name")] = harness_tot.get(a.get("agent_name"), 0) + a.get("total_tokens", 0)
             user_cum += latest["total_tokens"]
             pushes += len(in_window)
             if latest["collected_at"] >= last_push:
                 last_push, email, role = latest["collected_at"], latest["email"], latest["role"]
-            for m in _loads(latest["models_json"]):
-                key = f"{m.get('agent_name')}/{m.get('model_id')}"
-                prev = base_models.get((m.get("agent_name"), m.get("model_id")), 0) if base else 0
-                d = max(0, m.get("total_tokens", 0) - prev)
-                entry = model_tot.setdefault(key, {"tokens": 0, "sessions": 0})
-                entry["tokens"] += d
-                entry["sessions"] += m.get("session_count", 0) or 0
-            for a in _loads(latest["agents_json"]):
-                prev = base_agents.get(a.get("agent_name"), 0) if base else 0
-                harness_tot[a.get("agent_name")] = harness_tot.get(a.get("agent_name"), 0) + max(
-                    0, a.get("total_tokens", 0) - prev)
         if pushes == 0:
             continue
         role_tot[role] = role_tot.get(role, 0) + user_score
@@ -345,6 +387,16 @@ def _loads(s) -> list:
         return []
 
 
+def _nonneg_int(value: object, field: str) -> int:
+    try:
+        total = int(value or 0)
+    except (TypeError, ValueError):
+        raise ValueError(f"bad {field}")
+    if total < 0 or total > 10**13:
+        raise ValueError(f"implausible {field}")
+    return total
+
+
 def _checked_agents(raw) -> list:
     """Validate harness rows; every rendered name passes the allowlist."""
     if not isinstance(raw, list):
@@ -353,11 +405,12 @@ def _checked_agents(raw) -> list:
     for a in raw[:64]:
         if not isinstance(a, dict):
             raise ValueError("bad agent row")
-        total = int(a.get("total_tokens", 0) or 0)
-        if total < 0 or total > 10**13:
-            raise ValueError("implausible agent total")
-        clean.append({"agent_name": safe_text(a.get("agent_name", ""), "agent_name"),
-                      "total_tokens": total})
+        row = {"agent_name": safe_text(a.get("agent_name", ""), "agent_name"),
+               "total_tokens": _nonneg_int(a.get("total_tokens", 0), "agent total")}
+        if "today_tokens" in a:
+            # Preserve key presence: it tells scoring a today scan ran.
+            row["today_tokens"] = _nonneg_int(a.get("today_tokens", 0), "agent today")
+        clean.append(row)
     return clean
 
 
@@ -369,16 +422,16 @@ def _checked_models(raw) -> list:
     for m in raw[:256]:
         if not isinstance(m, dict):
             raise ValueError("bad model row")
-        total = int(m.get("total_tokens", 0) or 0)
-        if total < 0 or total > 10**13:
-            raise ValueError("implausible model total")
-        clean.append({
+        row = {
             "agent_name": safe_text(m.get("agent_name", ""), "agent_name"),
             "model_id": safe_text(m.get("model_id", ""), "model_id"),
-            "total_tokens": total,
+            "total_tokens": _nonneg_int(m.get("total_tokens", 0), "model total"),
             "session_count": max(0, int(m.get("session_count", 0) or 0)),
             "turn_count": max(0, int(m.get("turn_count", 0) or 0)),
-        })
+        }
+        if "today_tokens" in m:
+            row["today_tokens"] = _nonneg_int(m.get("today_tokens", 0), "model today")
+        clean.append(row)
     return clean
 
 

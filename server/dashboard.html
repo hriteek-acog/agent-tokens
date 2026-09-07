@@ -166,7 +166,7 @@ async function load(){
   document.getElementById("models").innerHTML = data.models.slice(0,8).map(x=>{
     const i = x.model.indexOf("/");
     const h = i < 0 ? "" : x.model.slice(0, i), mod = i < 0 ? x.model : x.model.slice(i+1);
-    return `<tr><td>${esc(h)}</td><td>${esc(mod)}</td><td class="num">${x.sessions}</td><td class="num">${fmt(x.tokens)}</td></tr>`;
+    return `<tr><td>${esc(h)}</td><td>${esc(mod)}</td><td class="num">${x.sessions ? x.sessions : "–"}</td><td class="num">${fmt(x.tokens)}</td></tr>`;
   }).join("") || "<tr><td colspan=4>—</td></tr>";
   const sel = document.getElementById("roleSel");
   const roles = Object.keys(data.by_role).sort();

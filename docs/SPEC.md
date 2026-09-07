@@ -169,6 +169,9 @@ One JSON document per push, `schema = "agent-tokens.snapshot/v1"`:
 ```
 
 - Per-model totals use the §2.2 formula; `agents[]` collapses models per agent.
+- When the sync also ran a today-only scan, every agent/model row gains
+  `today_tokens` (key presence = a today scan ran; legacy rows lack the key)
+  plus top-level `today_total`.
 - `checksum` = SHA-256 over canonical JSON of the payload **minus** `checksum`
   (`json.dumps(sort_keys=True, separators=(",", ":"))`). `verify_snapshot()`
   recomputes and compares. Any mutation invalidates it.
@@ -262,6 +265,11 @@ score; multi-machine users sum correctly):
   (baseline 0 for brand-new series — onboarding day counts the full total).
   Same delta math per harness (`agents_json`) and per model (`models_json`,
   keyed `agent/model`, top 25 returned).
+- No-baseline exception (the onboarding-day rule): when a series has no
+  pre-window snapshot AND its rows carry `today_tokens`, daily uses the latest
+  in-window today portion and weekly/all-time sum each in-window day's last
+  today portion — lifetime history never counts as "today". Rows without the
+  key (legacy clients) keep the old full-total fallback.
 - Response: `{window, window_start, generated_at, users[] (rank, username, role,
   email, tokens, cumulative, pushes, last_push), by_role{}, roles[], harnesses[],
   models[]}` with users sorted desc, ranks assigned. Results are cached

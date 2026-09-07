@@ -183,11 +183,14 @@ def _maybe_sync(selected_filter, server_url=None) -> None:
         if not ident:
             return  # not onboarded yet — stay silent, stay local
         # Full scan regardless of display filter: leaderboard sees everything.
+        # Plus a today-only scan: without it the server can't tell today's
+        # portion from lifetime history on baseline-less days (onboarding).
         full_providers = [cls() for cls in ALL_PROVIDERS]
         full_reports = collect_reports(full_providers, today_only=False)
+        today_reports = collect_reports([cls() for cls in ALL_PROVIDERS], today_only=True)
         payload = _sync.build_snapshot(
             ident.username, ident.email, ident.role, full_reports,
-            client_version=__version__,
+            client_version=__version__, today_reports=today_reports,
         )
         server = server_url or _sync.DEFAULT_SERVER_URL
         result = _sync.sync_snapshot(payload, server_url=server)

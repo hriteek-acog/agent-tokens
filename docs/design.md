@@ -33,8 +33,9 @@ auth stays at the reverse-proxy/layer level (documented, not in-app).
 `latest_in_window − latest_before_window` per user/harness/model.
 **Alternatives considered:** Trusting client `--today` splits — rejected: estimates
 differ per provider and clients could cherry-pick windows.
-**Consequences:** Honest cross-user comparison; onboarding-day users score their
-full total (documented bootstrap rule).
+**Consequences:** Honest cross-user comparison once baselines exist.
+Superseded for the no-baseline case (below): onboarding day now scores the
+client-measured today portion, not the full total.
 
 ### SSH UID beats JSON username; admin users.json beats client role
 **Status:** Accepted
@@ -63,6 +64,17 @@ score when its push landed last; test fixtures did the same.
 **Consequences:** Multi-machine users are correct by construction; single-host
 stale/low pushes still collapse that host's series (accepted: cumulative
 counters have no better oracle).
+
+### Today-portion scoring without a baseline
+**Status:** Accepted (supersedes the onboarding-day bootstrap rule above)
+**Context:** Baseline-less series (every new user) counted lifetime history —
+  including harnesses untouched for weeks — as "today".
+**Decision:** Sync ships client-measured `today_tokens` per agent/model; the
+server scores no-baseline series from the today portion (daily: latest; weekly:
+per-day lasts summed). Key presence marks new-format rows; legacy rows keep the
+old fallback.
+**Consequences:** One extra local scan per sync run; provider "today" splits
+are estimates for some harnesses (matches terminal `--today`, honestly labeled).
 
 ### INGEST_TOKEN gate on machine HTTPS
 **Status:** Accepted
