@@ -56,6 +56,23 @@ class TestCodexProvider(unittest.TestCase):
             self.assertEqual(len(rep.recent_sessions), 1)
             self.assertEqual(rep.recent_sessions[0].title, "proj")
 
+    def test_model_switch_splits_session(self):
+        with tempfile.TemporaryDirectory() as d:
+            def tc(inp, out):
+                return {"type": "event_msg", "payload": {"type": "token_count", "info": {
+                    "total_token_usage": {"input_tokens": inp, "output_tokens": out}}}}
+            _write_jsonl(os.path.join(d, "rollout-sw.jsonl"), [
+                {"type": "session_meta", "payload": {"cwd": "/tmp/proj"}},
+                {"type": "turn_context", "payload": {"model": "gpt-a"}},
+                tc(100, 10),
+                {"type": "turn_context", "payload": {"model": "gpt-b"}},
+                tc(250, 30),  # cumulative: gpt-b gets the +150/+20
+            ])
+            rep = CodexProvider(base_dir=d).get_report()
+            by_id = {m.model_id: (m.input_tokens, m.output_tokens) for m in rep.models}
+            self.assertEqual(by_id, {"gpt-a": (100, 10), "gpt-b": (150, 20)})
+            self.assertEqual(len(rep.recent_sessions), 2)
+
     def test_old_schema_lump_total_fallback(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "rollout-old.jsonl")

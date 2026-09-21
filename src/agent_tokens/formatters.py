@@ -104,11 +104,15 @@ def render_terminal(
         lines.append(f"{B}{accent}► {report.agent_name.upper()}{R}")
         lines.append(f"{D}────────────────────────────────────────────────────────────────────────────────{R}")
 
-        if not report.models:
+        # Hide all-zero model rows from the human display (a session that
+        # moved zero tokens is noise). JSON output and leaderboard sync keep
+        # everything — this is display-only filtering.
+        models = [m for m in report.models if m.total_tokens > 0]
+        if not models:
             lines.append(f"  {D}No activity recorded for this timeframe.{R}\n")
             continue
 
-        show_turns = any((m.turn_count or 0) > 0 for m in report.models)
+        show_turns = any((m.turn_count or 0) > 0 for m in models)
         if show_turns:
             lines.append(
                 f"{B}{'Model':<30} {'Sessions':<8} {'Turns':<6} {'Input':<9} {'Output':<9} {'Reason':<8} {'Cache':<10} {'Total':<10}{R}"
@@ -119,7 +123,7 @@ def render_terminal(
             )
         lines.append(f"{D}{'-'*96}{R}")
 
-        for m in report.models:
+        for m in models:
             grand_total_tokens += m.total_tokens
             cache = _cache_total(m)
             if show_turns:
@@ -136,9 +140,10 @@ def render_terminal(
                     f"{format_number(cache):<11} {B}{format_number(m.total_tokens):<10}{R}"
                 )
 
-        if report.recent_sessions:
+        sessions = [s for s in report.recent_sessions if s.total_tokens > 0]
+        if sessions:
             lines.append(f"\n  {B}Recent Active Sessions:{R}")
-            for s in report.recent_sessions[:5]:
+            for s in sessions[:5]:
                 title = s.title or s.session_id[:18]
                 t = title if len(title) <= 45 else title[:42] + "..."
                 turns_suffix = f" · {s.turn_count} turns" if (s.turn_count or 0) > 0 else ""

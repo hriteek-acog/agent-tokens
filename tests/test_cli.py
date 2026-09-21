@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
@@ -79,6 +80,16 @@ class _RegistryPatch:
 
 
 class TestCLI(unittest.TestCase):
+    def setUp(self):
+        # main() background-syncs on every run. The kill-switch keeps fixture
+        # reports in test_cli's stubs from ever reaching the production board
+        # on an onboarded machine (this bit us: m1/100 rows in prod).
+        self._env = mock.patch.dict(os.environ, {"AGENT_TOKENS_NO_SYNC": "1"})
+        self._env.start()
+
+    def tearDown(self):
+        self._env.stop()
+
     def test_registry_covers_twelve_agents(self):
         self.assertEqual(len(ALL_PROVIDERS), 12)
         self.assertEqual(len(FLAG_MAP), 12)

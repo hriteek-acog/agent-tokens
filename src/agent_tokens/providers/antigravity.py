@@ -3,7 +3,6 @@
 import glob
 import os
 import sqlite3
-from collections import Counter
 from datetime import datetime, date
 from typing import Optional, Dict, Any, List
 
@@ -233,15 +232,12 @@ class AntigravityProvider(BaseProvider):
             if not rows:
                 continue
 
-            session_in = session_out = session_reasoning = session_cached = 0
-            model_votes: Counter = Counter()
-            turns = 0
+            per_model: Dict[str, Dict[str, int]] = {}
             for row in rows:
                 metrics = _extract_gen_tokens(row[0])
                 if not metrics:
                     continue
                 m = metrics["model"] or _UNKNOWN_MODEL
-                model_votes[m] += 1
                 bucket = models_dict.setdefault(
                     m,
                     {
@@ -253,35 +249,32 @@ class AntigravityProvider(BaseProvider):
                         "sessions": set(),
                     },
                 )
-                bucket["input"] += metrics["input"]
-                bucket["output"] += metrics["output"]
-                bucket["reasoning"] += metrics["reasoning"]
-                bucket["cached"] += metrics["cached"]
-                bucket["turns"] += 1
+                sess = per_model.setdefault(
+                    m, {"input": 0, "output": 0, "reasoning": 0, "cached": 0, "turns": 0}
+                )
+                for acc in (bucket, sess):
+                    acc["input"] += metrics["input"]
+                    acc["output"] += metrics["output"]
+                    acc["reasoning"] += metrics["reasoning"]
+                    acc["cached"] += metrics["cached"]
+                    acc["turns"] += 1
                 bucket["sessions"].add(cid)
 
-                session_in += metrics["input"]
-                session_out += metrics["output"]
-                session_reasoning += metrics["reasoning"]
-                session_cached += metrics["cached"]
-                turns += 1
-
-            if session_in or session_out or session_cached:
-                # Attribute multi-model sessions to the most frequent model.
-                session_model = (
-                    model_votes.most_common(1)[0][0] if model_votes else _UNKNOWN_MODEL
-                )
-                updated = mtime[:19] if isinstance(mtime, str) and mtime else None
+            # One session row per model, so mid-conversation switches show both.
+            updated = mtime[:19] if isinstance(mtime, str) and mtime else None
+            for m, sess in per_model.items():
+                if not (sess["input"] or sess["output"] or sess["cached"]):
+                    continue
                 recent_sessions.append(
                     SessionInfo(
                         session_id=cid,
                         title=meta.get("title") or cid[:18],
-                        model_id=session_model,
-                        input_tokens=session_in,
-                        output_tokens=session_out,
-                        reasoning_tokens=session_reasoning,
-                        cache_read_tokens=session_cached,
-                        turn_count=turns,
+                        model_id=m,
+                        input_tokens=sess["input"],
+                        output_tokens=sess["output"],
+                        reasoning_tokens=sess["reasoning"],
+                        cache_read_tokens=sess["cached"],
+                        turn_count=sess["turns"],
                         updated_at=updated,
                     )
                 )
