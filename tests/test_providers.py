@@ -99,7 +99,7 @@ class TestClaudeProvider(unittest.TestCase):
             with open(path, "w") as f:
                 f.write("{not json")
             p = ClaudeCodeProvider(stats_path=path)
-            self.assertIsNone(p.get_report())
+            self.assertEqual(p.get_report().models, [])
 
     def test_all_time_breakdown(self):
         with tempfile.TemporaryDirectory() as d:
@@ -162,6 +162,38 @@ class TestClaudeProvider(unittest.TestCase):
             )
             rep = ClaudeCodeProvider(stats_path=path).get_report(today_only=True)
             self.assertEqual(rep.models, [])
+
+    def test_transcripts_cover_days_after_cache(self):
+        """Regression: the stats cache goes stale unless /stats runs."""
+        from datetime import date, timezone
+
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        usage = {"input_tokens": 1, "output_tokens": 2,
+                 "cache_read_input_tokens": 30, "cache_creation_input_tokens": 4}
+        line = {"type": "assistant", "timestamp": now, "sessionId": "s1", "cwd": "/w/proj",
+                "message": {"id": "msg_1", "model": "claude-x", "usage": usage}}
+        old = dict(line, timestamp="2000-01-01T00:00:00Z",
+                   message={"id": "msg_0", "model": "claude-x", "usage": usage})
+        with tempfile.TemporaryDirectory() as d:
+            path = self._write(d, {
+                "lastComputedDate": "2000-01-01",
+                "modelUsage": {"claude-x": {"inputTokens": 100}},
+                "dailyModelTokens": [],
+            })
+            os.makedirs(os.path.join(d, "projects", "p"))
+            with open(os.path.join(d, "projects", "p", "s1.jsonl"), "w") as f:
+                # Same message id twice: one line per content block.
+                for rec in (old, line, line):
+                    f.write(json.dumps(rec) + "\n")
+            p = ClaudeCodeProvider(stats_path=path)
+
+            today = p.get_report(today_only=True)
+            self.assertEqual(today.models[0].total_tokens, 37)
+            self.assertEqual(today.models[0].turn_count, 1)
+            self.assertEqual(today.recent_sessions[0].title, "proj")
+
+            # All-time: cache up to lastComputedDate + transcripts after it.
+            self.assertEqual(p.get_report().models[0].total_tokens, 137)
 
     def test_split_fallback_without_baseline(self):
         stats = _split_total_proportionally("new-model", 500, {})
