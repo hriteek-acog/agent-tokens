@@ -131,12 +131,13 @@ def _read_transcript_usage(projects_dir: str, after: Optional[str]) -> List[dict
 def _aggregate(records: List[dict]):
     models: Dict[str, TokenStats] = {}
     model_sessions: Dict[str, set] = {}
-    sessions: Dict[str, SessionInfo] = {}
+    # One session row per model, so a mid-session /model switch shows both.
+    sessions: Dict[tuple, SessionInfo] = {}
     for r in records:
         local_ts = parse_iso_to_local(r["timestamp"])
         m = models.setdefault(r["model"], TokenStats(model_id=r["model"]))
         s = sessions.setdefault(
-            r["session"],
+            (r["session"], r["model"]),
             SessionInfo(
                 session_id=r["session"],
                 title=os.path.basename(str(r["cwd"]).rstrip("/")),
@@ -154,7 +155,6 @@ def _aggregate(records: List[dict]):
             m.last_active = local_ts
         if local_ts and local_ts > (s.updated_at or ""):
             s.updated_at = local_ts
-            s.model_id = r["model"]
     for model_id, ids in model_sessions.items():
         models[model_id].session_count = len(ids)
     return models, list(sessions.values())

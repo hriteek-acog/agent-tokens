@@ -18,18 +18,20 @@ _UNKNOWN_MODEL = "codex-unknown"
 
 
 def _parse_rollout(path: str) -> Optional[Dict[str, object]]:
-    """Extract cumulative token usage + metadata from one rollout JSONL file.
+    """Extract per-model token usage + metadata from one rollout JSONL file.
 
     Codex appends ``event_msg`` records with ``type == 'token_count'`` whose
-    ``info.total_token_usage`` is cumulative for the session, so the last
-    one wins. The model comes from ``turn_context`` payloads.
+    ``info.total_token_usage`` is cumulative for the session. Each event's
+    growth over the previous one is credited to the model of the latest
+    ``turn_context``, so a mid-session model switch splits correctly.
     """
     model = _UNKNOWN_MODEL
     timestamp: Optional[str] = None
     cwd: Optional[str] = None
-    total: Optional[Dict[str, object]] = None
-    turns = 0
-    token_events = 0
+    prev: Dict[str, int] = {}
+    by_model: Dict[str, Dict[str, int]] = {}
+    turns: Dict[str, int] = {}
+    token_events: Dict[str, int] = {}
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
@@ -48,7 +50,7 @@ def _parse_rollout(path: str) -> Optional[Dict[str, object]]:
                 elif rtype == "turn_context" and isinstance(payload, dict):
                     if isinstance(payload.get("model"), str) and payload["model"]:
                         model = payload["model"]
-                    turns += 1
+                    turns[model] = turns.get(model, 0) + 1
                 elif rtype == "event_msg":
                     # Shape: {"type": "event_msg", "payload": {"type": "token_count", "info": {...}}}
                     if not isinstance(payload, dict):
@@ -57,20 +59,23 @@ def _parse_rollout(path: str) -> Optional[Dict[str, object]]:
                         info = payload.get("info", {}) if isinstance(payload, dict) else {}
                         tu = info.get("total_token_usage", {}) if isinstance(info, dict) else {}
                         if isinstance(tu, dict) and tu:
-                            total = tu
-                            token_events += 1
+                            acc = by_model.setdefault(model, {})
+                            for k, v in tu.items():
+                                cur = safe_int(v)
+                                acc[k] = acc.get(k, 0) + max(cur - prev.get(k, 0), 0)
+                                prev[k] = cur
+                            token_events[model] = token_events.get(model, 0) + 1
     except OSError:
         return None
-    if total is None:
+    if not by_model:
         return None
     return {
-        "model": model,
         "timestamp": timestamp,
         "cwd": cwd,
-        "total": total,
+        "by_model": by_model,
         # Older rollouts lack turn_context records; each token_count event
         # marks model activity, so it doubles as a turns fallback.
-        "turns": turns or token_events,
+        "turns": {m: turns.get(m) or token_events.get(m, 0) for m in by_model},
     }
 
 
@@ -99,58 +104,58 @@ class CodexProvider(BaseProvider):
             parsed = _parse_rollout(path)
             if not parsed:
                 continue
-            total = parsed["total"]
             ts = parsed.get("timestamp")
             local_ts = parse_iso_to_local(ts)
             if today_only and not (is_today_str(ts) or file_is_today(path)):
                 continue
 
-            in_tokens = safe_int(total.get("input_tokens"))
-            cached_in = safe_int(total.get("cached_input_tokens"))
-            cache_write = safe_int(total.get("cache_write_input_tokens"))
-            out_tokens = safe_int(total.get("output_tokens"))
-            reasoning = safe_int(total.get("reasoning_output_tokens"))
-            # Codex reports cached input *within* input_tokens; store the
-            # non-cached portion as input and cached as cache_read so the
-            # dashboard columns stay meaningful and the total stays exact.
-            net_input = max(in_tokens - cached_in, 0)
-            if not (net_input or out_tokens or reasoning or cached_in or cache_write):
-                # Older rollouts only record a lump total_tokens figure.
-                net_input = safe_int(total.get("total_tokens"))
-            model_id = str(parsed.get("model") or _UNKNOWN_MODEL)
-            turns = safe_int(parsed.get("turns"))
-
-            bucket = models.setdefault(
-                model_id,
-                {"input": 0, "output": 0, "reasoning": 0, "cached": 0,
-                 "cache_write": 0, "turns": 0, "sessions": set()},
-            )
-            bucket["input"] += net_input
-            bucket["output"] += out_tokens
-            bucket["reasoning"] += reasoning
-            bucket["cached"] += cached_in
-            bucket["cache_write"] += cache_write
-            bucket["turns"] += turns
-            bucket["sessions"].add(path)
-            if local_ts and local_ts > model_last_active.get(model_id, ""):
-                model_last_active[model_id] = local_ts
-
             cwd = parsed.get("cwd") or ""
             title = os.path.basename(str(cwd).rstrip("/")) if cwd else os.path.basename(path)
-            sessions.append(
-                SessionInfo(
-                    session_id=os.path.basename(path)[:36],
-                    title=title or "codex-session",
-                    model_id=model_id,
-                    input_tokens=net_input,
-                    output_tokens=out_tokens,
-                    reasoning_tokens=reasoning,
-                    cache_read_tokens=cached_in,
-                    cache_write_tokens=cache_write,
-                    turn_count=turns,
-                    updated_at=local_ts or None,
+            # One session row per model, so mid-session switches show both.
+            for model_id, total in parsed["by_model"].items():
+                in_tokens = safe_int(total.get("input_tokens"))
+                cached_in = safe_int(total.get("cached_input_tokens"))
+                cache_write = safe_int(total.get("cache_write_input_tokens"))
+                out_tokens = safe_int(total.get("output_tokens"))
+                reasoning = safe_int(total.get("reasoning_output_tokens"))
+                # Codex reports cached input *within* input_tokens; store the
+                # non-cached portion as input and cached as cache_read so the
+                # dashboard columns stay meaningful and the total stays exact.
+                net_input = max(in_tokens - cached_in, 0)
+                if not (net_input or out_tokens or reasoning or cached_in or cache_write):
+                    # Older rollouts only record a lump total_tokens figure.
+                    net_input = safe_int(total.get("total_tokens"))
+                turns = safe_int(parsed["turns"].get(model_id))
+
+                bucket = models.setdefault(
+                    model_id,
+                    {"input": 0, "output": 0, "reasoning": 0, "cached": 0,
+                     "cache_write": 0, "turns": 0, "sessions": set()},
                 )
-            )
+                bucket["input"] += net_input
+                bucket["output"] += out_tokens
+                bucket["reasoning"] += reasoning
+                bucket["cached"] += cached_in
+                bucket["cache_write"] += cache_write
+                bucket["turns"] += turns
+                bucket["sessions"].add(path)
+                if local_ts and local_ts > model_last_active.get(model_id, ""):
+                    model_last_active[model_id] = local_ts
+
+                sessions.append(
+                    SessionInfo(
+                        session_id=os.path.basename(path)[:36],
+                        title=title or "codex-session",
+                        model_id=model_id,
+                        input_tokens=net_input,
+                        output_tokens=out_tokens,
+                        reasoning_tokens=reasoning,
+                        cache_read_tokens=cached_in,
+                        cache_write_tokens=cache_write,
+                        turn_count=turns,
+                        updated_at=local_ts or None,
+                    )
+                )
 
         stats = [
             TokenStats(

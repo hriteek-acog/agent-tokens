@@ -69,6 +69,33 @@ class TestOpenCodeProvider(unittest.TestCase):
             self.assertEqual(today.models[0].model_id, "model-a")
             self.assertEqual(len(today.recent_sessions), 1)
 
+    def test_model_switch_splits_session(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "opencode.db")
+            now_ms = int(time.time() * 1000)
+            _make_opencode_db(db, now_ms)
+            conn = sqlite3.connect(db)
+            conn.execute(
+                "CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER,"
+                " time_updated INTEGER, data TEXT)"
+            )
+            for i, (model, n) in enumerate([("model-a", 10), ("model-c", 7), ("model-c", 3)]):
+                data = {"role": "assistant", "modelID": model,
+                        "tokens": {"input": n, "output": 0, "reasoning": 0,
+                                   "cache": {"read": 0, "write": 0}}}
+                conn.execute("INSERT INTO message VALUES (?,?,?,?,?)",
+                             (f"m{i}", "s1", now_ms, now_ms, json.dumps(data)))
+            conn.execute("INSERT INTO message VALUES (?,?,?,?,?)",
+                         ("u1", "s1", now_ms, now_ms, json.dumps({"role": "user"})))
+            conn.commit()
+            conn.close()
+
+            rep = OpenCodeProvider(db_path=db).get_report(today_only=True)
+            by_id = {m.model_id: m.total_tokens for m in rep.models}
+            self.assertEqual(by_id, {"model-a": 10, "model-c": 10})
+            rows = {(r.session_id, r.model_id): r.turn_count for r in rep.recent_sessions}
+            self.assertEqual(rows, {("s1", "model-a"): 1, ("s1", "model-c"): 2})
+
     def test_missing_table_returns_empty_report(self):
         with tempfile.TemporaryDirectory() as d:
             db = os.path.join(d, "opencode.db")
@@ -195,6 +222,23 @@ class TestClaudeProvider(unittest.TestCase):
             # All-time: cache up to lastComputedDate + transcripts after it.
             self.assertEqual(p.get_report().models[0].total_tokens, 137)
 
+    def test_model_switch_splits_session(self):
+        from datetime import timezone
+
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        usage = {"input_tokens": 5}
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "projects", "p"))
+            with open(os.path.join(d, "projects", "p", "s1.jsonl"), "w") as f:
+                for i, model in enumerate(["claude-a", "claude-b", "claude-b"]):
+                    f.write(json.dumps({"timestamp": now, "sessionId": "s1", "message": {
+                        "id": f"msg_{i}", "model": model, "usage": usage}}) + "\n")
+            rep = ClaudeCodeProvider(stats_path=os.path.join(d, "stats-cache.json")).get_report(
+                today_only=True
+            )
+            rows = {(r.session_id, r.model_id): r.total_tokens for r in rep.recent_sessions}
+            self.assertEqual(rows, {("s1", "claude-a"): 5, ("s1", "claude-b"): 10})
+
     def test_split_fallback_without_baseline(self):
         stats = _split_total_proportionally("new-model", 500, {})
         self.assertEqual(stats.total_tokens, 500)
@@ -264,6 +308,23 @@ class TestAntigravityProvider(unittest.TestCase):
                 today_rep = p.get_report(today_only=True)
             self.assertTrue(all_rep.models)
             self.assertEqual(today_rep.models, [])
+
+    def test_model_switch_splits_session(self):
+        with tempfile.TemporaryDirectory() as base:
+            conv = os.path.join(base, "conversations")
+            os.makedirs(conv)
+            conn = sqlite3.connect(os.path.join(conv, "cid.db"))
+            conn.execute("CREATE TABLE gen_metadata (idx INTEGER, data BLOB)")
+            for i, model in enumerate([b"a", b"b", b"b"]):
+                conn.execute("INSERT INTO gen_metadata VALUES (?, ?)", (i, model))
+            conn.commit()
+            conn.close()
+            fake = lambda blob: {"model": blob.decode(), "input": 5, "output": 0,
+                                 "cached": 0, "reasoning": 0}
+            with mock.patch("agent_tokens.providers.antigravity._extract_gen_tokens", fake):
+                rep = AntigravityProvider(base_dir=base).get_report()
+            rows = {(r.session_id, r.model_id): r.turn_count for r in rep.recent_sessions}
+            self.assertEqual(rows, {("cid", "a"): 1, ("cid", "b"): 2})
 
     def test_recent_sessions_sorted_by_recency(self):
         self.assertTrue(datetime.now())  # smoke: module imports cleanly

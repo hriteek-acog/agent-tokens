@@ -3,7 +3,7 @@
 import os
 import sqlite3
 from datetime import datetime, date
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from agent_tokens.models import AgentReport, TokenStats, SessionInfo
 from agent_tokens.providers.base import BaseProvider
@@ -14,9 +14,10 @@ _RECENT_SESSION_LIMIT = 25
 class OpenCodeProvider(BaseProvider):
     """Parses ~/.local/share/opencode/opencode.db.
 
-    Reads the ``session`` table (tokens_input/output/reasoning/cache_read/
-    cache_write + ``time_updated`` in epoch milliseconds). Opened read-only
-    so a running OpenCode instance is never locked.
+    Reads assistant rows of the ``message`` table (per-message ``modelID``
+    and tokens), falling back to the ``session`` table's totals on DBs
+    without it. ``--today`` keeps sessions updated since local midnight.
+    Opened read-only so a running OpenCode instance is never locked.
     """
 
     def __init__(self, db_path: Optional[str] = None):
@@ -55,65 +56,50 @@ class OpenCodeProvider(BaseProvider):
                 if not cur.fetchone():
                     return AgentReport(agent_name=self.name)
 
+                cur.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='message'"
+                )
+                has_messages = cur.fetchone() is not None
                 params: List[object] = []
                 where = ""
                 if midnight_ms is not None:
-                    where = "WHERE time_updated >= ?"
+                    where = "AND s.time_updated >= ?"
                     params.append(midnight_ms)
 
-                cur.execute(
-                    f"""
-                    SELECT
-                        json_extract(model, '$.id') as model_id,
-                        count(id) as session_count,
-                        coalesce(sum(tokens_input), 0) as in_tokens,
-                        coalesce(sum(tokens_output), 0) as out_tokens,
-                        coalesce(sum(tokens_reasoning), 0) as reasoning_tokens,
-                        coalesce(sum(tokens_cache_read), 0) as cache_read,
-                        coalesce(sum(tokens_cache_write), 0) as cache_write,
-                        max(datetime(time_updated/1000, 'unixepoch', 'localtime')) as last_active
-                    FROM session
-                    {where}
-                    GROUP BY model_id
-                    ORDER BY
-                        (coalesce(sum(tokens_input),0)
-                         + coalesce(sum(tokens_output),0)
-                         + coalesce(sum(tokens_reasoning),0)
-                         + coalesce(sum(tokens_cache_read),0)
-                         + coalesce(sum(tokens_cache_write),0)) DESC
-                    """,
-                    params,
-                )
-                models = [
-                    TokenStats(
-                        model_id=r["model_id"] or "unknown",
-                        input_tokens=r["in_tokens"] or 0,
-                        output_tokens=r["out_tokens"] or 0,
-                        reasoning_tokens=r["reasoning_tokens"] or 0,
-                        cache_read_tokens=r["cache_read"] or 0,
-                        cache_write_tokens=r["cache_write"] or 0,
-                        session_count=r["session_count"] or 0,
-                        last_active=r["last_active"],
+                if has_messages:
+                    # Per-message model: a session that switches models
+                    # yields one row per model instead of crediting all
+                    # tokens to the session's last model.
+                    cur.execute(
+                        f"""
+                        SELECT s.id, s.title, json_extract(m.data, '$.modelID'),
+                               sum(json_extract(m.data, '$.tokens.input')),
+                               sum(json_extract(m.data, '$.tokens.output')),
+                               sum(json_extract(m.data, '$.tokens.reasoning')),
+                               sum(json_extract(m.data, '$.tokens.cache.read')),
+                               sum(json_extract(m.data, '$.tokens.cache.write')),
+                               datetime(max(m.time_updated)/1000, 'unixepoch', 'localtime'),
+                               count(m.id)
+                        FROM message m JOIN session s ON s.id = m.session_id
+                        WHERE json_extract(m.data, '$.role') = 'assistant' {where}
+                        GROUP BY s.id, json_extract(m.data, '$.modelID')
+                        """,
+                        params,
                     )
-                    for r in cur.fetchall()
-                ]
-
-                # Recent sessions are useful for both scopes; for all-time we
-                # show the most recently active ones.
-                cur.execute(
-                    f"""
-                    SELECT id, title, json_extract(model, '$.id'),
-                           tokens_input, tokens_output,
-                           tokens_reasoning, tokens_cache_read, tokens_cache_write,
-                           datetime(time_updated/1000, 'unixepoch', 'localtime')
-                    FROM session
-                    {where}
-                    ORDER BY time_updated DESC
-                    LIMIT ?
-                    """,
-                    [*params, _RECENT_SESSION_LIMIT],
-                )
-                sessions = [
+                else:
+                    cur.execute(
+                        f"""
+                        SELECT s.id, s.title, json_extract(s.model, '$.id'),
+                               s.tokens_input, s.tokens_output, s.tokens_reasoning,
+                               s.tokens_cache_read, s.tokens_cache_write,
+                               datetime(s.time_updated/1000, 'unixepoch', 'localtime'),
+                               0
+                        FROM session s
+                        WHERE 1 {where}
+                        """,
+                        params,
+                    )
+                rows = [
                     SessionInfo(
                         session_id=r[0] or "unknown",
                         title=r[1] or (r[0][:18] if r[0] else "untitled"),
@@ -124,10 +110,32 @@ class OpenCodeProvider(BaseProvider):
                         cache_read_tokens=r[6] or 0,
                         cache_write_tokens=r[7] or 0,
                         updated_at=r[8],
+                        turn_count=r[9] or 0,
                     )
                     for r in cur.fetchall()
                 ]
         except sqlite3.Error:
             return AgentReport(agent_name=self.name)
 
-        return AgentReport(agent_name=self.name, models=models, recent_sessions=sessions)
+        models: Dict[str, TokenStats] = {}
+        model_sessions: Dict[str, set] = {}
+        for r in rows:
+            m = models.setdefault(r.model_id, TokenStats(model_id=r.model_id))
+            m.input_tokens += r.input_tokens
+            m.output_tokens += r.output_tokens
+            m.reasoning_tokens += r.reasoning_tokens
+            m.cache_read_tokens += r.cache_read_tokens
+            m.cache_write_tokens += r.cache_write_tokens
+            m.turn_count += r.turn_count
+            model_sessions.setdefault(r.model_id, set()).add(r.session_id)
+            if r.updated_at and r.updated_at > (m.last_active or ""):
+                m.last_active = r.updated_at
+        for model_id, ids in model_sessions.items():
+            models[model_id].session_count = len(ids)
+
+        stats = sorted(models.values(), key=lambda x: x.total_tokens, reverse=True)
+        rows = [r for r in rows if r.total_tokens > 0]
+        rows.sort(key=lambda r: r.updated_at or "", reverse=True)
+        return AgentReport(
+            agent_name=self.name, models=stats, recent_sessions=rows[:_RECENT_SESSION_LIMIT]
+        )
